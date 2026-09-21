@@ -1,0 +1,7 @@
+# Filled-in configuration. Public material, but per-operator; the example is the reference.
+config.env
+
+# Scratch output from running the scripts by hand.
+*.der
+*.log
+/tmp/

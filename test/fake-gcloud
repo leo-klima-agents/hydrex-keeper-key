@@ -1,0 +1,213 @@
+#!/bin/sh
+# test/fake-gcloud - a gcloud stub for the golden tests. Never talks to GCP.
+#
+# Appends one line per call to $FAKE_GCLOUD_LOG and answers from canned state
+# chosen by $FAKE_GCLOUD_SCENARIO. Temp file paths are normalized in the log:
+# --output-file=... becomes --output-file=<file>, and the policy file handed to
+# set-iam-policy is replaced by its canonical JSON, so the golden shows the
+# exact policy the script would write. $FAKE_ADMIN_GROUP and $FAKE_KEEPER_SA
+# name the principals the canned policies contain.
+set -eu
+
+: "${FAKE_GCLOUD_LOG:?}" "${FAKE_GCLOUD_SCENARIO:?}" "${FAKE_ADMIN_GROUP:?}" "${FAKE_KEEPER_SA:?}"
+
+# --- scenario -> state ----------------------------------------------------------
+api_enabled=yes ring_exists=yes key_exists=yes key_window=10368000s
+key_policy=full project_audit=yes orgpolicy=enforced
+versions=one version_state=ENABLED pubkey=k1
+case "$FAKE_GCLOUD_SCENARIO" in
+  fresh) # nothing exists yet
+    api_enabled=no ring_exists=no key_exists=no key_policy=none project_audit=no
+    orgpolicy=unset version_state=PENDING_GENERATION ;;
+  existing) ;; # everything as setup.sh and grant.sh leave it
+  repair) # key exists but the surroundings drifted; org policy write is refused
+    key_window=2592000s key_policy=admin project_audit=no orgpolicy=denied ;;
+  foreign-key) key_exists=foreign ;;
+  admin-only) key_policy='admin' ;;
+  two-versions) versions=two ;;
+  extra-binding) key_policy=extra ;;
+  other-key) pubkey=k2 ;;
+  no-audit) project_audit=no ;;
+  window-and-disabled) key_window=7776000s version_state=DISABLED ;;
+  *) printf 'fake-gcloud: unknown scenario %s\n' "$FAKE_GCLOUD_SCENARIO" >&2; exit 98 ;;
+esac
+
+# --- canned material ------------------------------------------------------------
+pem_k1() {
+  cat <<EOT
+-----BEGIN PUBLIC KEY-----
+MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEeb5mfvncu6xVoGKVzocLBwKb/NstzijZ
+WfKBWxb4F5hIOtp3JqPEZV2k+/wOEQio/Re0SKaFVBmcR9CP+xDUuA==
+-----END PUBLIC KEY-----
+EOT
+}
+pem_k2() {
+  cat <<EOT
+-----BEGIN PUBLIC KEY-----
+MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAExgR/lEHtfW0wRUBulcB82Fx3jkuM7zyn
+q6wJuVxwnuUa4Wj+pj3DOaPFhBlGbOru9/YyZTJm0OEjZDGpUM/lKg==
+-----END PUBLIC KEY-----
+EOT
+}
+
+key_json() { # key_json NAME
+  case "$key_exists" in
+    foreign) key_algorithm=EC_SIGN_P256_SHA256 key_protection=SOFTWARE ;;
+    *) key_algorithm=EC_SIGN_SECP256K1_SHA256 key_protection=HSM ;;
+  esac
+  printf '{"createTime":"2026-09-21T00:00:00Z","destroyScheduledDuration":"%s","name":"%s","purpose":"ASYMMETRIC_SIGN","versionTemplate":{"algorithm":"%s","protectionLevel":"%s"}}\n' \
+    "$key_window" "$1" "$key_algorithm" "$key_protection"
+}
+
+version_json() { # version_json NAME STATE
+  printf '{"algorithm":"EC_SIGN_SECP256K1_SHA256","createTime":"2026-09-21T00:00:00Z","generateTime":"2026-09-21T00:00:01Z","name":"%s","protectionLevel":"HSM","state":"%s"}' "$1" "$2"
+}
+
+key_policy_json() {
+  admin="{\"role\":\"roles/cloudkms.admin\",\"members\":[\"group:$FAKE_ADMIN_GROUP\"]}"
+  viewer="{\"role\":\"roles/cloudkms.publicKeyViewer\",\"members\":[\"serviceAccount:$FAKE_KEEPER_SA\"]}"
+  signer="{\"role\":\"roles/cloudkms.signer\",\"members\":[\"serviceAccount:$FAKE_KEEPER_SA\"]}"
+  stray='{"role":"roles/cloudkms.viewer","members":["user:stray@example.com"]}'
+  case "$key_policy" in
+    none) printf '{"etag":"ACAB"}\n' ;;
+    admin) printf '{"bindings":[%s],"etag":"BwKeyAdmin","version":1}\n' "$admin" ;;
+    full) printf '{"bindings":[%s,%s,%s],"etag":"BwKeyFull","version":1}\n' "$admin" "$viewer" "$signer" ;;
+    extra) printf '{"bindings":[%s,%s,%s,%s],"etag":"BwKeyExtra","version":1}\n' "$admin" "$viewer" "$signer" "$stray" ;;
+  esac
+}
+key_policy_etag() { key_policy_json | jq -r .etag; }
+
+project_policy_json() {
+  bindings="[{\"role\":\"roles/owner\",\"members\":[\"group:$FAKE_ADMIN_GROUP\"]}]"
+  other_audit='{"service":"allServices","auditLogConfigs":[{"logType":"ADMIN_READ"}]}'
+  kms_audit='{"service":"cloudkms.googleapis.com","auditLogConfigs":[{"logType":"ADMIN_READ"},{"logType":"DATA_READ"},{"logType":"DATA_WRITE"}]}'
+  case "$project_audit" in
+    yes) printf '{"auditConfigs":[%s,%s],"bindings":%s,"etag":"BwProjAudited","version":1}\n' "$other_audit" "$kms_audit" "$bindings" ;;
+    no) printf '{"auditConfigs":[%s],"bindings":%s,"etag":"BwProjPlain","version":1}\n' "$other_audit" "$bindings" ;;
+  esac
+}
+project_policy_etag() { project_policy_json | jq -r .etag; }
+
+# --- argument parsing -----------------------------------------------------------
+project='' location='' keyring='' key='' filter='' output_file=''
+for arg in "$@"; do
+  case "$arg" in
+    --project=*) project=${arg#*=} ;;
+    --location=*) location=${arg#*=} ;;
+    --keyring=*) keyring=${arg#*=} ;;
+    --key=*) key=${arg#*=} ;;
+    --filter=*) filter=${arg#*=} ;;
+    --output-file=*) output_file=${arg#*=} ;;
+  esac
+done
+
+log_call() { # log_call ARGS... (already normalized)
+  printf 'gcloud %s\n' "$*" >>"$FAKE_GCLOUD_LOG"
+}
+
+# Verify a set-iam-policy file carries the etag we handed out, then log its
+# canonical content in place of the path.
+log_set_policy() { # log_set_policy EXPECTED_ETAG ARGS...
+  expected_etag=$1
+  shift
+  file=$(eval "printf '%s' \"\$$#\"") # last argument
+  [ -f "$file" ] || { printf 'fake-gcloud: policy file %s missing\n' "$file" >&2; exit 97; }
+  [ "$(jq -r '.etag // ""' "$file")" = "$expected_etag" ] || {
+    printf 'fake-gcloud: policy etag %s, expected %s\n' "$(jq -r .etag "$file")" "$expected_etag" >&2
+    exit 96
+  }
+  logged=''
+  while [ $# -gt 1 ]; do logged="$logged $1"; shift; done
+  log_call "${logged# } $(jq -c -S . "$file")"
+}
+
+# --- dispatch -------------------------------------------------------------------
+case "$*" in
+  "version --format=json")
+    log_call "$@"
+    printf '{"Google Cloud SDK":"500.0.0","core":"2026.09.01"}\n' ;;
+
+  "services list --enabled "*)
+    log_call "$@"
+    if [ "$api_enabled" = yes ]; then printf 'cloudkms.googleapis.com\n'; fi ;;
+  "services enable cloudkms.googleapis.com "*)
+    log_call "$@" ;;
+
+  "kms keyrings list "*)
+    log_call "$@"
+    ring_name=${filter#name=}
+    if [ "$ring_exists" = yes ]; then
+      printf '[{"createTime":"2026-09-21T00:00:00Z","name":"%s"}]\n' "$ring_name"
+    else
+      printf '[]\n'
+    fi ;;
+  "kms keyrings create "*)
+    log_call "$@" ;;
+
+  "kms keys list "*)
+    log_call "$@"
+    key_name=${filter#name=}
+    if [ "$key_exists" = no ]; then printf '[]\n'; else printf '[%s]\n' "$(key_json "$key_name")"; fi ;;
+  "kms keys create "*)
+    log_call "$@" ;;
+  "kms keys update "*)
+    log_call "$@" ;;
+  "kms keys describe "*)
+    log_call "$@"
+    key_json "$2" ;;
+  "kms keys get-iam-policy "*)
+    log_call "$@"
+    key_policy_json ;;
+  "kms keys set-iam-policy "*)
+    log_set_policy "$(key_policy_etag)" "$@" ;;
+
+  "kms keys versions describe "*)
+    log_call "$@"
+    version_json "$4" "$version_state"
+    printf '\n' ;;
+  "kms keys versions list "*)
+    log_call "$@"
+    v1="projects/$project/locations/$location/keyRings/$keyring/cryptoKeys/$key/cryptoKeyVersions/1"
+    v2="projects/$project/locations/$location/keyRings/$keyring/cryptoKeys/$key/cryptoKeyVersions/2"
+    if [ "$versions" = two ]; then
+      printf '[%s,%s]\n' "$(version_json "$v1" "$version_state")" "$(version_json "$v2" ENABLED)"
+    else
+      printf '[%s]\n' "$(version_json "$v1" "$version_state")"
+    fi ;;
+  "kms keys versions get-public-key "*)
+    logged=''
+    for arg in "$@"; do
+      case "$arg" in --output-file=*) logged="$logged --output-file=<file>" ;; *) logged="$logged $arg" ;; esac
+    done
+    log_call "${logged# }"
+    "pem_$pubkey" >"$output_file" ;;
+
+  "projects get-iam-policy "*)
+    log_call "$@"
+    project_policy_json ;;
+  "projects set-iam-policy "*)
+    log_set_policy "$(project_policy_etag)" "$@" ;;
+
+  "resource-manager org-policies describe "*)
+    log_call "$@"
+    if [ "$orgpolicy" = enforced ]; then
+      printf '{"booleanPolicy":{"enforced":true},"constraint":"constraints/iam.disableServiceAccountKeyCreation"}\n'
+    else
+      printf '{"constraint":"constraints/iam.disableServiceAccountKeyCreation"}\n'
+    fi ;;
+  "resource-manager org-policies enable-enforce "*)
+    log_call "$@"
+    if [ "$orgpolicy" = denied ]; then
+      printf 'ERROR: (gcloud.resource-manager.org-policies.enable-enforce) PERMISSION_DENIED\n' >&2
+      exit 1
+    fi ;;
+
+  "iam service-accounts describe "*)
+    log_call "$@"
+    printf '%s\n' "$2" ;;
+
+  *)
+    log_call "UNEXPECTED:" "$@"
+    printf 'fake-gcloud: unexpected call: gcloud %s\n' "$*" >&2
+    exit 99 ;;
+esac
