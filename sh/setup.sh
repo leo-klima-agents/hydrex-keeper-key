@@ -5,7 +5,7 @@
 # 2. Create the key ring if absent.
 # 3. Create the key if absent: asymmetric signing, secp256k1, HSM, 120-day
 #    destroy window. Refuse to adopt an existing key with a different purpose,
-#    algorithm or protection level.
+#    algorithm, protection level or destroy window (the window is immutable).
 # 4. Write the complete key IAM policy from policy/key.iam.json.tmpl.
 # 5. Write the KMS Data Access audit config into the project IAM policy.
 # 6. Enforce iam.disableServiceAccountKeyCreation on the project, if permitted.
@@ -59,10 +59,9 @@ else
     die "$EXIT_KEY_ATTRIBUTES" "key $KEY_NAME exists with purpose=$purpose algorithm=$algorithm protectionLevel=$protection; expected $KEY_PURPOSE_API/$KEY_ALGORITHM_API/$KEY_PROTECTION_API. Not adopting it. Pick another KEY name or resolve by hand."
   fi
   log "key exists with the expected purpose, algorithm and protection level"
-  if [ "$window" != "$DESTROY_WINDOW_API" ]; then
-    log "destroy window is ${window:-unset}; setting $DESTROY_WINDOW"
-    gcloud kms keys update "$KEY_NAME" --destroy-scheduled-duration="$DESTROY_WINDOW"
-  fi
+  # destroyScheduledDuration is immutable on a CryptoKey; there is no update.
+  [ "$window" = "$DESTROY_WINDOW_API" ] ||
+    die "$EXIT_DESTROY_WINDOW" "key $KEY_NAME has destroy window ${window:-unset}, expected $DESTROY_WINDOW_API ($DESTROY_WINDOW). The window is immutable; a key with the right window must be created under another KEY name."
 fi
 
 # 4. Key IAM: the complete policy, admin group plus keeper (if configured).
