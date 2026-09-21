@@ -3,7 +3,8 @@
 #
 # Read-only. Runs every check, reports each failure, and exits with the code
 # of the first one (see lib.sh for the codes). With RELAY_REPO_DIR, also
-# confirms KEEPER in script/Deploy.s.sol matches the record.
+# confirms the address part one deploys as KEEPER, published by part one in
+# script/keeper.json, matches the record.
 #
 # This is the only script CI runs against the real cloud (weekly, through
 # Workload Identity Federation with a viewer role on the key project).
@@ -151,33 +152,36 @@ else
   fail "$EXIT_ORG_POLICY" "$SA_KEY_CONSTRAINT is not enforced on $KEY_PROJECT"
 fi
 
-# Relay repo (optional)
+# Relay repo (optional). Part one publishes the address its deploy script
+# uses as KEEPER in script/keeper.json: {"address": "0x...", "version": "..."}.
+# The address is required; the version, when present, must be this record's.
+# Two JSON values are compared; no Solidity is parsed.
 if [ -n "$relay_dir" ]; then
-  deploy=$relay_dir/script/Deploy.s.sol
-  if [ ! -f "$deploy" ]; then
-    fail "$EXIT_RELAY" "$deploy not found"
+  relay_file=$relay_dir/script/keeper.json
+  if [ ! -f "$relay_file" ]; then
+    fail "$EXIT_RELAY" "$relay_file not found; part one must publish the KEEPER address there"
+  elif ! relay_fields=$(jq -r -s '
+      def field: (. // "") | if type != "string" or test("\\p{Cc}") then error("bad field") else . end;
+      if length != 1 or (.[0] | type) != "object" then error("not a JSON object")
+      else .[0] | (.address | field), (.version | field), "end" end' "$relay_file" 2>/dev/null); then
+    fail "$EXIT_RELAY" "$relay_file is not a single JSON object with plain string fields"
   else
-    # The KEEPER assignment itself, in the source with comments and string
-    # literals removed and lines joined: not a commented-out old value, not a
-    # KEEPER_* identifier, not a `KEEPER ==` comparison, and wrapped
-    # assignments still match. The literal may be wrapped in any number of
-    # address(...) or payable(...) casts and must end there: a longer hex
-    # literal is not an address. `$` is an identifier character in Solidity,
-    # so `$KEEPER` is not KEEPER, and `cfg.KEEPER` is a member, not the
-    # constant. Exactly one distinct address is required.
-    relay_addresses=$(strip_solidity_comments <"$deploy" |
-      grep -Eo '(^|[^A-Za-z0-9_$.])KEEPER[[:space:]]*=[[:space:]]*((address|payable)\([[:space:]]*)*0x[0-9a-fA-F]{40}([^0-9a-fA-F_]|$)' |
-      grep -Eo '0x[0-9a-fA-F]{40}' | tr 'A-F' 'a-f' | sort -u)
-    relay_count=$(printf '%s' "$relay_addresses" | grep -c . || true)
-    relay_keeper=$(printf '%s' "$relay_addresses" | head -n 1)
-    if [ "$relay_count" -eq 0 ]; then
-      fail "$EXIT_RELAY" "no KEEPER assignment found in $deploy"
-    elif [ "$relay_count" -gt 1 ]; then
-      fail "$EXIT_RELAY" "$relay_count different KEEPER assignments in $deploy:$(printf '%s' "$relay_addresses" | tr '\n' ' ' | sed 's/^/ /')"
-    elif [ "$relay_keeper" = "$(printf '%s' "$recorded_address" | tr 'A-F' 'a-f')" ]; then
-      ok "KEEPER in $deploy is $recorded_address"
+    {
+      read -r relay_address
+      read -r relay_version
+    } <<EOT
+$relay_fields
+EOT
+    relay_lower=$(printf '%s' "$relay_address" | tr 'A-F' 'a-f')
+    recorded_lower=$(printf '%s' "$recorded_address" | tr 'A-F' 'a-f')
+    if [ -z "$relay_address" ]; then
+      fail "$EXIT_RELAY" "$relay_file has no address"
+    elif [ "$relay_lower" != "$recorded_lower" ]; then
+      fail "$EXIT_RELAY" "KEEPER in $relay_file is $relay_address, record says $recorded_address"
+    elif [ -n "$relay_version" ] && [ "$relay_version" != "$recorded_version" ]; then
+      fail "$EXIT_RELAY" "$relay_file names key version $relay_version, record is $recorded_version"
     else
-      fail "$EXIT_RELAY" "KEEPER in $deploy is $relay_keeper, record says $recorded_address"
+      ok "KEEPER in $relay_file is $recorded_address"
     fi
   fi
 fi
