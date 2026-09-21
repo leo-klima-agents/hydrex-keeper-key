@@ -268,35 +268,6 @@ describe_version_1() {
     die "$EXIT_KEY_ATTRIBUTES" "version 1 is algorithm=$version_algorithm protectionLevel=$version_protection"
 }
 
-# strip_solidity_comments: stdin -> stdout with // and /* */ comments and
-# string literals removed and lines joined with spaces, so an assignment can
-# be matched wherever a formatter wrapped it. One pass, one state machine.
-strip_solidity_comments() {
-  awk '
-    BEGIN { state = "code" }
-    {
-      line = $0 " "
-      n = length(line)
-      for (i = 1; i <= n; i++) {
-        c = substr(line, i, 1)
-        d = substr(line, i, 2)
-        if (state == "code") {
-          if (d == "//") { state = "line"; printf " "; break }
-          else if (d == "/*") { state = "block"; i++ }
-          else if (c == "\"" || c == "\047") { quote = c; state = "string" }
-          else printf "%s", c
-        } else if (state == "block") {
-          if (d == "*/") { state = "code"; i++; printf " " }
-        } else if (state == "string") {
-          if (c == "\\") i++
-          else if (c == quote) state = "code"
-        }
-      }
-      if (state == "line") state = "code"
-    }
-    END { printf "\n" }'
-}
-
 # Canonical form of an IAM policy for comparison: bindings and audit configs,
 # sorted, without etag or version. Reads JSON on stdin.
 normalize_policy() {

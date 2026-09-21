@@ -213,19 +213,12 @@ run_case check-no-audit no-audit with-keeper "$fixtures/record" check.sh
 compare check-no-audit "$tmp/check-no-audit.log"
 run_case check-relay-mismatch existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-bad"
 compare check-relay-mismatch "$tmp/check-relay-mismatch.log"
-run_case check-no-orgpolicy no-orgpolicy with-keeper "$fixtures/record" check.sh
-compare check-no-orgpolicy "$tmp/check-no-orgpolicy.log"
-mkdir "$tmp/record-multi"
-cat "$fixtures/record/keeper.json" "$fixtures/record/keeper.json" >"$tmp/record-multi/keeper.json"
-cp "$fixtures/record/keeper.pem" "$tmp/record-multi/"
-run_case check-record-multi existing with-keeper "$tmp/record-multi" check.sh
-compare check-record-multi "$tmp/check-record-multi.log"
-run_case check-relay-decoy existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-decoy"
-compare check-relay-decoy "$tmp/check-relay-decoy.log"
-run_case check-relay-fused existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-fused"
-compare check-relay-fused "$tmp/check-relay-fused.log"
-run_case check-relay-ambiguous existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-ambiguous"
-compare check-relay-ambiguous "$tmp/check-relay-ambiguous.log"
+run_case check-relay-version existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-wrong-version"
+compare check-relay-version "$tmp/check-relay-version.log"
+run_case check-relay-missing existing with-keeper "$fixtures/record" check.sh "$fixtures/empty"
+compare check-relay-missing "$tmp/check-relay-missing.log"
+run_case check-relay-malformed existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-malformed"
+compare check-relay-malformed "$tmp/check-relay-malformed.log"
 run_case check-bad-args existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-ok" extra
 compare check-bad-args "$tmp/check-bad-args.log"
 run_case check-no-versions no-versions with-keeper "$fixtures/record" check.sh

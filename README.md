@@ -36,7 +36,7 @@ test/run.sh                  runs every script under dash against the stub and d
 
 ## 1. Prerequisites
 
-Tools on the admin machine: `gcloud` (470.0.0 or newer, pinned in `sh/lib.sh`) and `jq` for every script; `openssl` and `cast` from [Foundry](https://getfoundry.sh) for `address.sh` and `check.sh` only, since only those derive the address. Scripts run under any POSIX `sh` with the usual utilities (`sed`, `awk`, `grep`, `od`, `tail`); CI runs them under `dash`.
+Tools on the admin machine: `gcloud` (470.0.0 or newer, pinned in `sh/lib.sh`) and `jq` for every script; `openssl` and `cast` from [Foundry](https://getfoundry.sh) for `address.sh` and `check.sh` only, since only those derive the address. Scripts run under any POSIX `sh` with the usual utilities (`od`, `tail`, `tr`); CI runs them under `dash`.
 
 Operator IAM, for the human running the scripts:
 
@@ -124,6 +124,17 @@ Compare with `address` in `record/keeper.json`, and `sha256sum keeper.pem` with 
 
 `address` in `record/keeper.json` is `KEEPER` in `hydrex-conduit-executor/script/Deploy.s.sol`. Deploy the module. `KEEPER` is immutable there, so a new key means a new module; that is by design, and it is why this repo never creates a second key version.
 
+Part one also publishes the value its deploy script uses, so `check.sh` can compare it without parsing Solidity. The contract is one file, `script/keeper.json` in the relay repo, a JSON object with a required `address` and an optional `version`:
+
+```json
+{
+  "address": "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf",
+  "version": "projects/KEY_PROJECT/locations/us/keyRings/hydrex-keeper/cryptoKeys/keeper/cryptoKeyVersions/1"
+}
+```
+
+The simplest way to produce it is to copy `record/keeper.json` from this repo; extra fields are ignored. The deploy script should read `KEEPER` from that file rather than repeat the literal.
+
 ## 6. Run grant.sh once part three exists
 
 When part three has created the Cloud Run job's service account, put its email in `KEEPER_SA` in `config.env`, then:
@@ -142,14 +153,12 @@ Commit nothing; the grant is visible in the live policy and asserted by `check.s
 
 ```sh
 sh/check.sh                       # against the live key project
-sh/check.sh ../hydrex-conduit-executor   # also compares KEEPER in script/Deploy.s.sol
+sh/check.sh ../hydrex-conduit-executor   # also compares KEEPER published in script/keeper.json
 ```
 
 It re-derives the address from the live key and compares it with `record/`, asserts version 1 is `ENABLED` and is the only version, that the key's purpose, algorithm, protection level and destroy window are unchanged, that version 1's own algorithm and protection level are secp256k1 and HSM (the key's template is mutable; the version's material is not), that the key's IAM policy equals the rendered template exactly, that the project audit config still contains the KMS entry, and that `iam.disableServiceAccountKeyCreation` is effectively enforced on the key project. Every check runs; every failure is printed; the exit code is the first failure's. A failed `gcloud` call is exit 1 with gcloud's message, never reported as drift. Key existence is a filtered `list`, so a key that is gone is a structured empty result and exit 10, not an error message to parse; a misspelled key ring or project is gcloud's error, exit 1. When version 1 is not an `ENABLED` secp256k1 HSM version the address check is skipped, since the derivation does not apply, and exits 10, 12 or 13 already name the problem.
 
-The relay comparison looks for the one `KEEPER = 0x…` assignment in `script/Deploy.s.sol` (also wrapped in any number of `address(…)` or `payable(…)` casts) after a single pass that removes `//` and `/* */` comments and string literals and joins lines. A commented-out old value, a URL inside a comment or a string, a `KEEPER_*` or `$KEEPER` identifier, a `cfg.KEEPER` member, a `KEEPER ==` comparison, a longer hex literal or a formatter-wrapped assignment do not confuse it. Two different assignments are exit 17 as well; part one must keep exactly one.
-
-`check.sh` renders the expected policy from your config, so once `grant.sh` has run, `KEEPER_SA` must be set wherever `check.sh` runs (config.env locally, the repository variable in CI), or the live grant reads as drift with exit 15.
+The relay comparison reads `script/keeper.json` in the relay repo (see section 5) and compares its `address` with the record, case-insensitively, and its `version` with the record when present. A missing file, a file that is not a single JSON object, a missing address, or a mismatch are all exit 17.
 
 | Exit | Meaning |
 |---|---|
@@ -164,7 +173,7 @@ The relay comparison looks for the one `KEEPER = 0x…` assignment in `script/De
 | 14 | live public key does not derive to the recorded address |
 | 15 | key IAM policy differs from the rendered template |
 | 16 | project audit config lacks the KMS entry |
-| 17 | `KEEPER` in the relay repo differs from the record |
+| 17 | `script/keeper.json` in the relay repo is missing, malformed, or differs from the record |
 | 18 | `record/` missing or malformed |
 | 19 | `iam.disableServiceAccountKeyCreation` is not enforced on the key project |
 
@@ -214,7 +223,7 @@ test/run.sh              # every script under dash against test/fake-gcloud, dif
 test/run.sh --update     # regenerate goldens after an intended change
 ```
 
-CI runs `shellcheck -s sh`, `checkbashisms`, `sh -n`, `reuse lint`, and the golden tests on every push and pull request. `test/fake-gcloud` answers from canned state per scenario and appends each call to a log; the log, the exit code, and any files written are compared with `test/golden/<case>.txt`. The scenarios cover a fresh project, an already-configured one, repairs, a foreign key, a key with the wrong destroy window, each drift `check.sh` detects, the pre-grant and post-grant states, the record refusal, refresh and `--force`, a malformed record, and relay files with decoy or ambiguous `KEEPER` lines. Where a script writes a policy, the golden holds the exact JSON it would send, including the etag, so a change to what the scripts would do shows up as a diff in review. Only the scheduled `check` job has GCP access.
+CI runs `shellcheck -s sh`, `checkbashisms`, `sh -n`, `reuse lint`, and the golden tests on every push and pull request. `test/fake-gcloud` answers from canned state per scenario and appends each call to a log; the log, the exit code, and any files written are compared with `test/golden/<case>.txt`. The scenarios cover a fresh project, an already-configured one, repairs, a foreign key, a key with the wrong destroy window, each drift `check.sh` detects, the pre-grant and post-grant states, the record refusal, refresh and `--force`, a malformed record, and a relay `script/keeper.json` that matches, mismatches, names another key version, is missing or is malformed. Where a script writes a policy, the golden holds the exact JSON it would send, including the etag, so a change to what the scripts would do shows up as a diff in review. Only the scheduled `check` job has GCP access.
 
 ## Decisions remaining
 
