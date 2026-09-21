@@ -80,21 +80,29 @@ desired=$(printf '%s\n' "$project_policy" | jq --slurpfile audit "$POLICY_DIR/au
 write_iam_if_changed "$KEY_PROJECT" "$project_policy" "$desired" projects
 
 # 6. Org policy: no service-account keys can ever be minted in this project.
+#    Read first; write only when the read succeeded and says not enforced.
 log "== 6/7 org policy"
-effective=$(gcloud resource-manager org-policies describe "$SA_KEY_CONSTRAINT" \
-  --project="$KEY_PROJECT" --effective --format=json 2>/dev/null || printf '{}')
-if [ "$(printf '%s\n' "$effective" | jq -r '.booleanPolicy.enforced // false')" = "true" ]; then
-  log "$SA_KEY_CONSTRAINT already enforced on $KEY_PROJECT (directly or inherited)"
-elif gcloud resource-manager org-policies enable-enforce "$SA_KEY_CONSTRAINT" --project="$KEY_PROJECT"; then
-  log "$SA_KEY_CONSTRAINT now enforced on $KEY_PROJECT"
+if effective=$(gcloud resource-manager org-policies describe "$SA_KEY_CONSTRAINT" \
+  --project="$KEY_PROJECT" --effective --format=json 2>"$TMP/orgpolicy.err"); then
+  if [ "$(printf '%s\n' "$effective" | jq -r '.booleanPolicy.enforced // false')" = "true" ]; then
+    log "$SA_KEY_CONSTRAINT already enforced on $KEY_PROJECT (directly or inherited)"
+  elif gcloud resource-manager org-policies enable-enforce "$SA_KEY_CONSTRAINT" --project="$KEY_PROJECT" 2>"$TMP/orgpolicy.err"; then
+    log "$SA_KEY_CONSTRAINT now enforced on $KEY_PROJECT"
+  else
+    log "WARNING: could not enforce $SA_KEY_CONSTRAINT on $KEY_PROJECT: $(cat "$TMP/orgpolicy.err")"
+    log "WARNING: needs orgpolicy.policy.set. Ask an org admin to set it, or inherit it from the folder."
+  fi
 else
-  log "WARNING: could not enforce $SA_KEY_CONSTRAINT on $KEY_PROJECT (needs orgpolicy.policy.set). Ask an org admin to set it, or inherit it from the folder."
+  log "WARNING: could not read the effective $SA_KEY_CONSTRAINT policy on $KEY_PROJECT: $(cat "$TMP/orgpolicy.err")"
+  log "WARNING: not attempting to set it. Check by hand or re-run once the read works."
 fi
 
 # 7. Version 1
 log "== 7/7 key version"
-state=$(gcloud kms keys versions describe "$KEY_VERSION_NAME" --format=json | jq -r '.state')
-log "state: $state"
-[ "$state" = "ENABLED" ] ||
-  log "version 1 is $state; HSM generation takes a moment. Run address.sh once it is ENABLED."
+version=$(gcloud kms keys versions describe "$KEY_VERSION_NAME" --format=json)
+read_version_attributes "$version" ||
+  die "$EXIT_KEY_ATTRIBUTES" "version 1 is algorithm=$version_algorithm protectionLevel=$version_protection"
+log "state: $version_state"
+[ "$version_state" = "ENABLED" ] ||
+  log "version 1 is $version_state; HSM generation takes a moment. Run address.sh once it is ENABLED."
 printf '%s\n' "$KEY_VERSION_NAME"

@@ -15,7 +15,11 @@ set -eu
 api_enabled=yes ring_exists=yes key_exists=yes key_window=10368000s
 key_policy=full project_audit=yes orgpolicy=enforced
 versions=one version_state=ENABLED pubkey=k1
+version_algorithm=EC_SIGN_SECP256K1_SHA256 version_protection=HSM
 case "$FAKE_GCLOUD_SCENARIO" in
+  no-key) key_exists=no ;;
+  version-two-only) versions=two-only ;;
+  foreign-version) version_algorithm=EC_SIGN_P256_SHA256 version_protection=SOFTWARE ;;
   fresh) # nothing exists yet
     api_enabled=no ring_exists=no key_exists=no key_policy=none project_audit=no
     orgpolicy=unset version_state=PENDING_GENERATION ;;
@@ -61,7 +65,8 @@ key_json() { # key_json NAME
 }
 
 version_json() { # version_json NAME STATE
-  printf '{"algorithm":"EC_SIGN_SECP256K1_SHA256","createTime":"2026-09-21T00:00:00Z","generateTime":"2026-09-21T00:00:01Z","name":"%s","protectionLevel":"HSM","state":"%s"}' "$1" "$2"
+  printf '{"algorithm":"%s","createTime":"2026-09-21T00:00:00Z","generateTime":"2026-09-21T00:00:01Z","name":"%s","protectionLevel":"%s","state":"%s"}' \
+    "$version_algorithm" "$1" "$version_protection" "$2"
 }
 
 key_policy_json() {
@@ -153,6 +158,10 @@ case "$*" in
     log_call "$@" ;;
   "kms keys describe "*)
     log_call "$@"
+    if [ "$key_exists" = no ]; then
+      printf 'ERROR: (gcloud.kms.keys.describe) NOT_FOUND: CryptoKey %s not found.\n' "$4" >&2
+      exit 1
+    fi
     key_json "$4" ;;
   "kms keys get-iam-policy "*)
     log_call "$@"
@@ -170,6 +179,8 @@ case "$*" in
     v2="projects/$project/locations/$location/keyRings/$keyring/cryptoKeys/$key/cryptoKeyVersions/2"
     if [ "$versions" = two ]; then
       printf '[%s,%s]\n' "$(version_json "$v1" "$version_state")" "$(version_json "$v2" ENABLED)"
+    elif [ "$versions" = two-only ]; then
+      printf '[%s]\n' "$(version_json "$v2" ENABLED)"
     else
       printf '[%s]\n' "$(version_json "$v1" "$version_state")"
     fi ;;
