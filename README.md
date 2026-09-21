@@ -71,7 +71,7 @@ Idempotent. In order:
 
 1. Enables `cloudkms.googleapis.com`.
 2. Creates the key ring if absent.
-3. Creates the key if absent: purpose `asymmetric-signing`, algorithm `ec-sign-secp256k1-sha256`, protection level `hsm`, destroy window `120d`. If a key of that name exists with a different purpose, algorithm or protection level, it stops with exit code 10 rather than adopting it. A wrong destroy window is corrected in place.
+3. Creates the key if absent: purpose `asymmetric-signing`, algorithm `ec-sign-secp256k1-sha256`, protection level `hsm`, destroy window `120d`. If a key of that name exists with a different purpose, algorithm or protection level, it stops with exit code 10 rather than adopting it. If the destroy window differs it stops with exit code 11: the window is immutable on a KMS key, so the only fix is a new key under another `KEY` name.
 4. Renders `policy/key.iam.json.tmpl` and writes it to the key with `set-iam-policy` using the live etag. Before `grant.sh` the policy is the admin group as `roles/cloudkms.admin` and nothing else. Once `KEEPER_SA` is in config, the keeper bindings are included, so running `setup.sh` after `grant.sh` never removes the grant.
 5. Merges `policy/audit.json` into the project IAM policy: the `cloudkms.googleapis.com` audit entry is replaced in full (ADMIN_READ, DATA_READ, DATA_WRITE); the project's bindings are left alone, since the project policy is not this repo's to own.
 6. Enforces `iam.disableServiceAccountKeyCreation` on the project, if permitted. Otherwise it prints a warning and continues; ask an org admin to set it or inherit it from the folder.
@@ -91,7 +91,7 @@ git commit -m "record: keeper key version 1"
 
 Prints the checksummed address and writes `record/`. The address is the property of key version 1 alone.
 
-Re-running it against the same key is a no-op. If `record/keeper.json` already exists and names a different key, address or public key, it refuses with exit 18 rather than overwrite the record that `check.sh` and part one's `KEEPER` are pinned to. `sh/address.sh --force` overrides that, for the case where a new key and therefore a new module are intended.
+Re-running it against the same key writes nothing and exits 0. If `record/keeper.json` already exists and names a different key version or address, it refuses with exit 18 rather than overwrite the record that `check.sh` and part one's `KEEPER` are pinned to. `sh/address.sh --force` overrides that, for the case where a new key and therefore a new module are intended. A record for the same key and address whose PEM bytes differ, which can only be a formatting change in gcloud's output, is refreshed without ceremony.
 
 ### The derivation, by hand
 
@@ -145,7 +145,9 @@ sh/check.sh                       # against the live key project
 sh/check.sh ../hydrex-conduit-executor   # also compares KEEPER in script/Deploy.s.sol
 ```
 
-It re-derives the address from the live key and compares it with `record/`, asserts version 1 is `ENABLED` and is the only version, that the key's purpose, algorithm, protection level and destroy window are unchanged, that version 1's own algorithm and protection level are secp256k1 and HSM (the key's template is mutable; the version's material is not), that the key's IAM policy equals the rendered template exactly, and that the project audit config still contains the KMS entry. Every check runs; every failure is printed; the exit code is the first failure's. A failed `gcloud` call is exit 1, never reported as drift.
+It re-derives the address from the live key and compares it with `record/`, asserts version 1 is `ENABLED` and is the only version, that the key's purpose, algorithm, protection level and destroy window are unchanged, that version 1's own algorithm and protection level are secp256k1 and HSM (the key's template is mutable; the version's material is not), that the key's IAM policy equals the rendered template exactly, and that the project audit config still contains the KMS entry. Every check runs; every failure is printed; the exit code is the first failure's. A failed `gcloud` call is exit 1, never reported as drift. When version 1 is not `ENABLED` the address check is skipped, since such a version has no retrievable public key, and exit 12 already names the problem.
+
+The relay comparison looks for the one `KEEPER = 0x…` assignment in `script/Deploy.s.sol` with comments stripped and lines joined, so a commented-out old value, a `KEEPER_*` identifier, a `KEEPER ==` comparison or a formatter-wrapped assignment do not confuse it. Two different assignments are exit 17 as well; part one must keep exactly one.
 
 `check.sh` renders the expected policy from your config, so once `grant.sh` has run, `KEEPER_SA` must be set wherever `check.sh` runs (config.env locally, the repository variable in CI), or the live grant reads as drift with exit 15.
 
@@ -156,7 +158,7 @@ It re-derives the address from the live key and compares it with `record/`, asse
 | 2 | config missing, incomplete or inconsistent; bad usage |
 | 3 | a required tool is missing or gcloud is older than the pinned minimum |
 | 10 | key missing, or purpose, algorithm or protection level differ |
-| 11 | destroy window is not 120 days |
+| 11 | destroy window is not 120 days (immutable; `setup.sh` will not adopt such a key) |
 | 12 | version 1 is not `ENABLED` |
 | 13 | a version other than 1 exists |
 | 14 | live public key does not derive to the recorded address |
@@ -165,7 +167,7 @@ It re-derives the address from the live key and compares it with `record/`, asse
 | 17 | `KEEPER` in the relay repo differs from the record |
 | 18 | `record/` missing or malformed |
 
-The same codes are used by `setup.sh` (2, 3, 10) and `address.sh` (2, 3, 10, 12, 18).
+The same codes are used by `setup.sh` (2, 3, 10, 11) and `address.sh` (2, 3, 10, 12, 18).
 
 ### Wiring the workflow
 
@@ -189,7 +191,7 @@ principalSet://iam.googleapis.com/projects/KEEPER_PROJECT_NUMBER/locations/globa
 
 Grant that principal `roles/viewer` and `roles/cloudkms.publicKeyViewer` on the key project, at project level. These two project-level bindings are the one thing in the key project this repo does not write authoritatively; part three owns them. The key's own policy stays exactly the template, and `check.sh` asserts that.
 
-Set these repository variables (Settings > Secrets and variables > Actions > Variables; they are public material, not secrets): `KEY_PROJECT`, `KEEPER_PROJECT`, `LOCATION`, `KEY_RING`, `KEY`, `ADMIN_GROUP`, `KEEPER_SA`, and `WIF_PROVIDER` as `projects/KEEPER_PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/github`. `sh/lib.sh` takes configuration from the environment when there is no `config.env`, which is how CI runs without one.
+Set these repository variables (Settings > Secrets and variables > Actions > Variables; they are public material, not secrets): `KEY_PROJECT`, `KEEPER_PROJECT`, `LOCATION`, `KEY_RING`, `KEY`, `ADMIN_GROUP`, `KEEPER_SA`, and `WIF_PROVIDER` as `projects/KEEPER_PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/github`. `sh/lib.sh` takes configuration from the environment only when there is no `config.env`, which is how CI runs without one. When the file exists it is authoritative, so a `KEY` or `LOCATION` left over in an operator's shell cannot point a script at another key.
 
 Then run the workflow once by hand (Actions > ci > Run workflow) and confirm the `check` job is green.
 
@@ -211,7 +213,7 @@ test/run.sh              # every script under dash against test/fake-gcloud, dif
 test/run.sh --update     # regenerate goldens after an intended change
 ```
 
-CI runs `shellcheck -s sh`, `checkbashisms`, `sh -n`, `reuse lint`, and the golden tests on every push and pull request. `test/fake-gcloud` answers from canned state per scenario and appends each call to a log; the log, the exit code, and any files written are compared with `test/golden/<case>.txt`. The scenarios cover a fresh project, an already-configured one, repairs, a foreign key, each drift `check.sh` detects, the pre-grant and post-grant states, the record refusal and `--force`, and a relay file with decoy `KEEPER` lines. Where a script writes a policy, the golden holds the exact JSON it would send, including the etag, so a change to what the scripts would do shows up as a diff in review. Only the scheduled `check` job has GCP access.
+CI runs `shellcheck -s sh`, `checkbashisms`, `sh -n`, `reuse lint`, and the golden tests on every push and pull request. `test/fake-gcloud` answers from canned state per scenario and appends each call to a log; the log, the exit code, and any files written are compared with `test/golden/<case>.txt`. The scenarios cover a fresh project, an already-configured one, repairs, a foreign key, a key with the wrong destroy window, each drift `check.sh` detects, the pre-grant and post-grant states, the record refusal, refresh and `--force`, a malformed record, and relay files with decoy or ambiguous `KEEPER` lines. Where a script writes a policy, the golden holds the exact JSON it would send, including the etag, so a change to what the scripts would do shows up as a diff in review. Only the scheduled `check` job has GCP access.
 
 ## Decisions remaining
 

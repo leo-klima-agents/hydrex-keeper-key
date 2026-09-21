@@ -14,6 +14,7 @@ script_dir=$(dirname -- "$0")
 . "$script_dir/lib.sh"
 
 force=no
+[ $# -le 1 ] || die "$EXIT_CONFIG" "usage: $0 [--force]"
 case "${1:-}" in
   "") ;;
   --force) force=yes ;;
@@ -25,27 +26,26 @@ load_config
 make_tmp
 
 version=$(gcloud kms keys versions describe "$KEY_VERSION_NAME" --format=json)
-state=$(printf '%s\n' "$version" | jq -r '.state')
-algorithm=$(printf '%s\n' "$version" | jq -r '.algorithm')
-protection=$(printf '%s\n' "$version" | jq -r '.protectionLevel')
-[ "$state" = "ENABLED" ] || die "$EXIT_VERSION_STATE" "version 1 is $state, not ENABLED"
-[ "$algorithm" = "$KEY_ALGORITHM_API" ] || die "$EXIT_KEY_ATTRIBUTES" "version 1 algorithm is $algorithm"
-[ "$protection" = "$KEY_PROTECTION_API" ] || die "$EXIT_KEY_ATTRIBUTES" "version 1 protection level is $protection"
+read_version_attributes "$version" ||
+  die "$EXIT_KEY_ATTRIBUTES" "version 1 is algorithm=$version_algorithm protectionLevel=$version_protection"
+[ "$version_state" = "ENABLED" ] || die "$EXIT_VERSION_STATE" "version 1 is $version_state, not ENABLED"
 
 pem=$TMP/keeper.pem
 gcloud kms keys versions get-public-key "$KEY_VERSION_NAME" --output-file="$pem"
 address=$(derive_address "$pem")
 pem_sha=$(sha256_file "$pem")
 
-existing=$RECORD_DIR/keeper.json
-if [ -f "$existing" ] && [ "$force" = no ]; then
-  existing_version=$(jq -r '.version // empty' "$existing")
-  existing_address=$(jq -r '.address // empty' "$existing")
-  existing_sha=$(jq -r '.pemSha256 // empty' "$existing")
-  if [ "$existing_version" != "$KEY_VERSION_NAME" ] || [ "$existing_address" != "$address" ] || [ "$existing_sha" != "$pem_sha" ]; then
-    die "$EXIT_RECORD" "$existing already records $existing_address for $existing_version; the live key derives to $address for $KEY_VERSION_NAME. A different key means a new module in part one. Re-run with --force only if that is intended."
+if [ -f "$RECORD_DIR/keeper.json" ] && [ "$force" = no ]; then
+  read_record
+  if [ "$recorded_version" != "$KEY_VERSION_NAME" ] || [ "$recorded_address" != "$address" ]; then
+    die "$EXIT_RECORD" "$RECORD_DIR/keeper.json already records $recorded_address for $recorded_version; the live key derives to $address for $KEY_VERSION_NAME. A different key means a new module in part one. Re-run with --force only if that is intended."
   fi
-  log "record already matches the live key"
+  if [ "$recorded_sha" = "$pem_sha" ]; then
+    log "record already matches the live key; nothing to write"
+    printf '%s\n' "$address"
+    exit 0
+  fi
+  log "record names the same key and address; refreshing keeper.pem and pemSha256"
 fi
 
 mkdir -p "$RECORD_DIR"
@@ -53,8 +53,8 @@ cp "$pem" "$RECORD_DIR/keeper.pem"
 jq -n \
   --arg key "$KEY_NAME" \
   --arg version "$KEY_VERSION_NAME" \
-  --arg algorithm "$algorithm" \
-  --arg protectionLevel "$protection" \
+  --arg algorithm "$version_algorithm" \
+  --arg protectionLevel "$version_protection" \
   --arg address "$address" \
   --arg pemSha256 "$pem_sha" \
   '{key: $key, version: $version, algorithm: $algorithm, protectionLevel: $protectionLevel, address: $address, pemSha256: $pemSha256}' \

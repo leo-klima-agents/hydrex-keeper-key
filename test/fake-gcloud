@@ -21,7 +21,8 @@ case "$FAKE_GCLOUD_SCENARIO" in
     orgpolicy=unset version_state=PENDING_GENERATION ;;
   existing) ;; # everything as setup.sh and grant.sh leave it
   repair) # key exists but the surroundings drifted; org policy write is refused
-    key_window=2592000s key_policy=admin project_audit=no orgpolicy=denied ;;
+    key_policy=admin project_audit=no orgpolicy=denied ;;
+  short-window) key_window=2592000s ;;
   foreign-key) key_exists=foreign ;;
   admin-only) key_policy='admin' ;;
   two-versions) versions=two ;;
@@ -149,8 +150,6 @@ case "$*" in
     key_name=${filter#name=}
     if [ "$key_exists" = no ]; then printf '[]\n'; else printf '[%s]\n' "$(key_json "$key_name")"; fi ;;
   "kms keys create "*)
-    log_call "$@" ;;
-  "kms keys update "*)
     log_call "$@" ;;
   "kms keys describe "*)
     log_call "$@"

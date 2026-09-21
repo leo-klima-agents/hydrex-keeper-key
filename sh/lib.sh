@@ -31,7 +31,7 @@ KEY_ALGORITHM=ec-sign-secp256k1-sha256
 KEY_ALGORITHM_API=EC_SIGN_SECP256K1_SHA256
 KEY_PROTECTION=hsm
 KEY_PROTECTION_API=HSM
-DESTROY_WINDOW=120d          # gcloud flag value; the API maximum
+DESTROY_WINDOW=120d          # gcloud flag value; the API maximum. Immutable once created.
 DESTROY_WINDOW_API=10368000s # 120 * 86400 seconds, as the API reports it
 SA_KEY_CONSTRAINT=iam.disableServiceAccountKeyCreation
 
@@ -94,25 +94,17 @@ require_tools() {
 }
 
 # --- configuration ------------------------------------------------------------
-# Reads config.env if present. Variables already in the environment win, which
-# is how CI supplies them without a config file.
+# Reads config.env when it exists; the file is authoritative, so a stray KEY or
+# LOCATION in the caller's environment cannot redirect a script to another key.
+# Without a file, variables come from the environment, which is how CI runs.
 load_config() {
   if [ -n "${HYDREX_CONFIG:-}" ] && [ ! -f "$CONFIG_FILE" ]; then
     die "$EXIT_CONFIG" "HYDREX_CONFIG points at $CONFIG_FILE, which does not exist"
   fi
   if [ -f "$CONFIG_FILE" ]; then
-    env_KEY_PROJECT=${KEY_PROJECT:-} env_KEEPER_PROJECT=${KEEPER_PROJECT:-}
-    env_LOCATION=${LOCATION:-} env_KEY_RING=${KEY_RING:-} env_KEY=${KEY:-}
-    env_ADMIN_GROUP=${ADMIN_GROUP:-} env_KEEPER_SA=${KEEPER_SA:-}
+    unset KEY_PROJECT KEEPER_PROJECT LOCATION KEY_RING KEY ADMIN_GROUP KEEPER_SA
     # shellcheck source=/dev/null
     . "$CONFIG_FILE"
-    KEY_PROJECT=${env_KEY_PROJECT:-${KEY_PROJECT:-}}
-    KEEPER_PROJECT=${env_KEEPER_PROJECT:-${KEEPER_PROJECT:-}}
-    LOCATION=${env_LOCATION:-${LOCATION:-}}
-    KEY_RING=${env_KEY_RING:-${KEY_RING:-}}
-    KEY=${env_KEY:-${KEY:-}}
-    ADMIN_GROUP=${env_ADMIN_GROUP:-${ADMIN_GROUP:-}}
-    KEEPER_SA=${env_KEEPER_SA:-${KEEPER_SA:-}}
   fi
   LOCATION=${LOCATION:-us}
   KEY_RING=${KEY_RING:-hydrex-keeper}
@@ -157,15 +149,57 @@ render_key_policy() {
 
 # read_key_attributes KEY_JSON: sets purpose, algorithm, protection and window
 # from a cryptoKey resource, and returns 0 if purpose, algorithm and protection
-# level are the expected ones.
+# level are the expected ones. One jq call; one field per line.
 read_key_attributes() {
-  purpose=$(printf '%s\n' "$1" | jq -r '.purpose')
-  algorithm=$(printf '%s\n' "$1" | jq -r '.versionTemplate.algorithm')
-  protection=$(printf '%s\n' "$1" | jq -r '.versionTemplate.protectionLevel')
-  window=$(printf '%s\n' "$1" | jq -r '.destroyScheduledDuration // empty')
+  key_fields=$(printf '%s\n' "$1" | jq -r '
+    (.purpose // ""), (.versionTemplate.algorithm // ""),
+    (.versionTemplate.protectionLevel // ""), (.destroyScheduledDuration // "")')
+  {
+    read -r purpose
+    read -r algorithm
+    read -r protection
+    read -r window
+  } <<EOT
+$key_fields
+EOT
   [ "$purpose" = "$KEY_PURPOSE_API" ] &&
     [ "$algorithm" = "$KEY_ALGORITHM_API" ] &&
     [ "$protection" = "$KEY_PROTECTION_API" ]
+}
+
+# read_version_attributes VERSION_JSON: sets version_state, version_algorithm
+# and version_protection from a cryptoKeyVersion resource, and returns 0 if the
+# algorithm and protection level are the expected ones. The key's template is
+# mutable; these are what the material actually has.
+read_version_attributes() {
+  version_fields=$(printf '%s\n' "$1" | jq -r '
+    (.state // ""), (.algorithm // ""), (.protectionLevel // "")')
+  {
+    read -r version_state
+    read -r version_algorithm
+    read -r version_protection
+  } <<EOT
+$version_fields
+EOT
+  [ "$version_algorithm" = "$KEY_ALGORITHM_API" ] &&
+    [ "$version_protection" = "$KEY_PROTECTION_API" ]
+}
+
+# read_record: loads record/keeper.json into recorded_version, recorded_address
+# and recorded_sha, or dies with EXIT_RECORD when the file is missing or
+# malformed.
+read_record() {
+  record_file=$RECORD_DIR/keeper.json
+  [ -f "$record_file" ] || die "$EXIT_RECORD" "$record_file missing; run address.sh first"
+  jq -e . "$record_file" >/dev/null 2>&1 || die "$EXIT_RECORD" "$record_file is not valid JSON"
+  record_fields=$(jq -r '(.version // ""), (.address // ""), (.pemSha256 // "")' "$record_file")
+  {
+    read -r recorded_version
+    read -r recorded_address
+    read -r recorded_sha
+  } <<EOT
+$record_fields
+EOT
 }
 
 # Canonical form of an IAM policy for comparison: bindings and audit configs,

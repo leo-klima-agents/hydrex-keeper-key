@@ -68,6 +68,8 @@ run_case setup-repair repair with-keeper "$fixtures/empty" setup.sh
 compare setup-repair "$tmp/setup-repair.log"
 run_case setup-foreign-key foreign-key admin-only "$fixtures/empty" setup.sh
 compare setup-foreign-key "$tmp/setup-foreign-key.log"
+run_case setup-short-window short-window admin-only "$fixtures/empty" setup.sh
+compare setup-short-window "$tmp/setup-short-window.log"
 
 # grant.sh
 run_case grant-fresh admin-only with-keeper "$fixtures/empty" grant.sh
@@ -105,9 +107,29 @@ cp "$fixtures/record/keeper.json" "$fixtures/record/keeper.pem" "$tmp/record-oth
 run_case address-other-key other-key admin-only "$tmp/record-other" address.sh
 compare address-other-key "$tmp/address-other-key.log"
 run_case address-other-key-force other-key admin-only "$tmp/record-other" address.sh --force
-printf -- '--- record/keeper.json ---\n' >>"$tmp/address-other-key-force.log"
-cat "$tmp/record-other/keeper.json" >>"$tmp/address-other-key-force.log"
+{
+  printf -- '--- record/keeper.json ---\n'
+  cat "$tmp/record-other/keeper.json"
+  printf -- '--- record/keeper.pem ---\n'
+  cat "$tmp/record-other/keeper.pem"
+} >>"$tmp/address-other-key-force.log"
 compare address-other-key-force "$tmp/address-other-key-force.log"
+# A record for the same key whose PEM bytes differ (gcloud formatting change)
+# is refreshed, not refused.
+mkdir "$tmp/record-stale-pem"
+cp "$fixtures/record/keeper.pem" "$tmp/record-stale-pem/"
+jq '.pemSha256 = "0000"' "$fixtures/record/keeper.json" >"$tmp/record-stale-pem/keeper.json"
+run_case address-refresh-pem existing admin-only "$tmp/record-stale-pem" address.sh
+printf -- '--- record/keeper.json ---\n' >>"$tmp/address-refresh-pem.log"
+cat "$tmp/record-stale-pem/keeper.json" >>"$tmp/address-refresh-pem.log"
+compare address-refresh-pem "$tmp/address-refresh-pem.log"
+mkdir "$tmp/record-malformed"
+printf 'not json\n' >"$tmp/record-malformed/keeper.json"
+cp "$fixtures/record/keeper.pem" "$tmp/record-malformed/"
+run_case address-malformed-record existing admin-only "$tmp/record-malformed" address.sh
+compare address-malformed-record "$tmp/address-malformed-record.log"
+run_case address-bad-args existing admin-only "$tmp/record" address.sh --force extra
+compare address-bad-args "$tmp/address-bad-args.log"
 run_case address-pending fresh admin-only "$tmp/record" address.sh
 compare address-pending "$tmp/address-pending.log"
 
@@ -116,6 +138,8 @@ run_case check-ok existing with-keeper "$fixtures/record" check.sh "$fixtures/re
 compare check-ok "$tmp/check-ok.log"
 run_case check-no-record existing with-keeper "$fixtures/empty" check.sh
 compare check-no-record "$tmp/check-no-record.log"
+run_case check-malformed-record existing with-keeper "$tmp/record-malformed" check.sh
+compare check-malformed-record "$tmp/check-malformed-record.log"
 run_case check-foreign-key foreign-key with-keeper "$fixtures/record" check.sh
 compare check-foreign-key "$tmp/check-foreign-key.log"
 run_case check-window-and-disabled window-and-disabled with-keeper "$fixtures/record" check.sh
@@ -138,6 +162,8 @@ run_case check-relay-mismatch existing with-keeper "$fixtures/record" check.sh "
 compare check-relay-mismatch "$tmp/check-relay-mismatch.log"
 run_case check-relay-decoy existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-decoy"
 compare check-relay-decoy "$tmp/check-relay-decoy.log"
+run_case check-relay-ambiguous existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-ambiguous"
+compare check-relay-ambiguous "$tmp/check-relay-ambiguous.log"
 
 if [ "$failures" -ne 0 ]; then
   printf '%s golden case(s) failed\n' "$failures"
