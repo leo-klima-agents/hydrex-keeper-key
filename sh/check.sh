@@ -1,13 +1,6 @@
 #!/bin/sh
-# sh/check.sh [RELAY_REPO_DIR] - live state vs record/ and vs the expected IAM.
-#
-# Read-only. Runs every check, reports each failure, and exits with the code
-# of the first one (see lib.sh for the codes). With RELAY_REPO_DIR, also
-# confirms the address part one deploys as KEEPER, published by part one in
-# script/keeper.json, matches the record.
-#
-# This is the only script CI runs against the real cloud (weekly, through
-# Workload Identity Federation with a viewer role on the key project).
+# check.sh [RELAY_REPO_DIR]: live state vs record/ and the expected IAM. Read-only.
+# Runs every check; exits with the first failure's code (see lib.sh).
 set -eu
 script_dir=$(dirname -- "$0")
 # shellcheck source=sh/lib.sh
@@ -30,20 +23,19 @@ fail() {
 ok() { log "ok: $*"; }
 
 # Record
-[ -f "$RECORD_DIR/keeper.pem" ] || die "$EXIT_RECORD" "$RECORD_DIR/keeper.pem missing; run address.sh first"
+[ -f "$RECORD_DIR/keeper.pem" ] || die "$EXIT_RECORD" "$RECORD_DIR/keeper.pem missing; run address.sh"
 read_record
 if [ -z "$recorded_address" ] || [ -z "$recorded_version" ] || [ -z "$recorded_sha" ]; then
-  die "$EXIT_RECORD" "$RECORD_DIR/keeper.json is missing address, version or pemSha256"
+  die "$EXIT_RECORD" "record lacks address, version or pemSha256"
 fi
 [ "$recorded_version" = "$KEY_VERSION_NAME" ] ||
-  die "$EXIT_RECORD" "record is for $recorded_version, config points at $KEY_VERSION_NAME"
+  die "$EXIT_RECORD" "record is for $recorded_version, config is $KEY_VERSION_NAME"
 [ "$(sha256_file "$RECORD_DIR/keeper.pem")" = "$recorded_sha" ] ||
-  die "$EXIT_RECORD" "record/keeper.pem does not match pemSha256 in keeper.json"
+  die "$EXIT_RECORD" "keeper.pem does not match pemSha256"
 
-# Key attributes. Absence is a structured empty lookup, exit 10; any other
-# failure is gcloud's, exit 1 with its message.
+# Key
 key=$(find_key)
-[ -n "$key" ] || die "$EXIT_KEY_ATTRIBUTES" "key $KEY_NAME not found"
+[ -n "$key" ] || die "$EXIT_KEY_ATTRIBUTES" "$KEY_NAME not found"
 if read_key_attributes "$key"; then
   ok "key is $purpose $algorithm $protection"
 else
@@ -55,9 +47,7 @@ else
   fail "$EXIT_DESTROY_WINDOW" "destroy window is ${window:-unset}, expected $DESTROY_WINDOW_API"
 fi
 
-# Versions: exactly one, and it is version 1, ENABLED, with the expected
-# algorithm and protection level of its own. One jq pass over the list; one
-# failure per distinct fact.
+# Versions: exactly one, version 1, ENABLED, expected algorithm and protection.
 versions=$(gcloud kms keys versions list --project="$KEY_PROJECT" --location="$LOCATION" \
   --keyring="$KEY_RING" --key="$KEY" --format=json)
 version_fields=$(printf '%s\n' "$versions" | jq -r --arg name "$KEY_VERSION_NAME" '
@@ -75,15 +65,15 @@ EOT
 version_state=missing version_ok=no
 if [ -z "$version1" ]; then
   if [ "$count" -eq 0 ]; then
-    fail "$EXIT_VERSION_COUNT" "no key versions exist"
+    fail "$EXIT_VERSION_COUNT" "no key versions"
   else
-    fail "$EXIT_VERSION_COUNT" "version 1 is missing; versions present: $listed"
+    fail "$EXIT_VERSION_COUNT" "version 1 missing; present: $listed"
   fi
 else
   if [ "$count" -eq 1 ]; then
-    ok "one key version, and it is version 1"
+    ok "one key version, version 1"
   else
-    fail "$EXIT_VERSION_COUNT" "$count key versions exist; the address is the property of version 1 alone: $listed"
+    fail "$EXIT_VERSION_COUNT" "$count key versions: $listed"
   fi
   if read_version_attributes "$version1"; then
     ok "version 1 is $version_algorithm $version_protection"
@@ -98,73 +88,63 @@ else
   fi
 fi
 
-# Address. Only an ENABLED secp256k1 version has a public key this derivation
-# applies to; for anything else the failures above already say what is wrong
-# and the remaining checks still run. For such a version a failed fetch is a
-# gcloud failure, exit 1.
+# Address. Only an ENABLED secp256k1 version has a public key to derive from.
 if [ "$version_state" = "ENABLED" ] && [ "$version_ok" = yes ]; then
   pem=$TMP/live.pem
   gcloud kms keys versions get-public-key "$KEY_VERSION_NAME" --output-file="$pem"
   live_address=$(derive_address "$pem")
   if [ "$live_address" = "$recorded_address" ]; then
     ok "live public key derives to $recorded_address"
-    # Same key, different PEM bytes can only be a formatting change in
-    # gcloud's output. Worth a note, not a failure; address.sh refreshes it.
     [ "$(sha256_file "$pem")" = "$recorded_sha" ] ||
-      log "note: live PEM bytes differ from record/keeper.pem while the address matches; run address.sh to refresh the record"
+      log "note: PEM bytes differ from record; run address.sh to refresh"
   else
     fail "$EXIT_ADDRESS" "live public key derives to $live_address, record says $recorded_address"
   fi
 else
-  log "skipping address check: version 1 is not an ENABLED $KEY_ALGORITHM_API $KEY_PROTECTION_API version"
+  log "skipping address check"
 fi
 
-# Key IAM equals the rendered template exactly. Reads are assigned before they
-# are compared so a failed gcloud call aborts instead of reading as drift.
+# Key IAM
 live_policy=$(get_iam "$KEY_NAME" kms keys)
 expected_policy=$(render_key_policy)
 if policy_differs "$live_policy" "$expected_policy"; then
-  fail "$EXIT_KEY_IAM" "key IAM policy differs from the rendered template"
+  fail "$EXIT_KEY_IAM" "key IAM policy differs from template"
   printf '%s\n' "$desired_norm" >"$TMP/expected.json"
   printf '%s\n' "$live_norm" >"$TMP/live.json"
   diff -u "$TMP/expected.json" "$TMP/live.json" >&2 || true
 else
-  ok "key IAM policy matches policy/key.iam.json.tmpl"
+  ok "key IAM policy matches template"
 fi
 
-# Project audit config still holds the KMS entry.
+# Audit config
 project_policy=$(get_iam "$KEY_PROJECT" projects)
 live_audit=$(printf '%s\n' "$project_policy" |
   jq -c --slurpfile audit "$POLICY_DIR/audit.json" \
     '{auditConfigs: ((.auditConfigs // []) | map(select(.service == $audit[0].service)))}')
 expected_audit=$(jq -c '{auditConfigs: [.]}' "$POLICY_DIR/audit.json")
 if policy_differs "$live_audit" "$expected_audit"; then
-  fail "$EXIT_AUDIT" "project audit config lacks the expected $KMS_SERVICE entry"
+  fail "$EXIT_AUDIT" "audit config lacks $KMS_SERVICE entry"
 else
-  ok "project audit config has the $KMS_SERVICE entry"
+  ok "audit config has $KMS_SERVICE entry"
 fi
 
-# Org policy: no service-account keys can be minted in the key project. A
-# failed read is gcloud's failure, exit 1, like every other read here.
+# Org policy
 if org_policy_enforced; then
-  ok "$SA_KEY_CONSTRAINT is enforced on $KEY_PROJECT"
+  ok "$SA_KEY_CONSTRAINT enforced"
 else
-  fail "$EXIT_ORG_POLICY" "$SA_KEY_CONSTRAINT is not enforced on $KEY_PROJECT"
+  fail "$EXIT_ORG_POLICY" "$SA_KEY_CONSTRAINT not enforced"
 fi
 
-# Relay repo (optional). Part one publishes the address its deploy script
-# uses as KEEPER in script/keeper.json: {"address": "0x...", "version": "..."}.
-# The address is required; the version, when present, must be this record's.
-# Two JSON values are compared; no Solidity is parsed.
+# Relay: script/keeper.json {"address": required, "version": optional}.
 if [ -n "$relay_dir" ]; then
   relay_file=$relay_dir/script/keeper.json
   if [ ! -f "$relay_file" ]; then
-    fail "$EXIT_RELAY" "$relay_file not found; part one must publish the KEEPER address there"
+    fail "$EXIT_RELAY" "$relay_file not found"
   elif ! relay_fields=$(jq -r -s '
       def field: (. // "") | if type != "string" or test("\\p{Cc}") then error("bad field") else . end;
       if length != 1 or (.[0] | type) != "object" then error("not a JSON object")
       else .[0] | (.address | field), (.version | field), "end" end' "$relay_file" 2>/dev/null); then
-    fail "$EXIT_RELAY" "$relay_file is not a single JSON object with plain string fields"
+    fail "$EXIT_RELAY" "$relay_file is not a single JSON object with string fields"
   else
     {
       read -r relay_address
@@ -179,14 +159,12 @@ EOT
     elif [ "$relay_lower" != "$recorded_lower" ]; then
       fail "$EXIT_RELAY" "KEEPER in $relay_file is $relay_address, record says $recorded_address"
     elif [ -n "$relay_version" ] && [ "$relay_version" != "$recorded_version" ]; then
-      fail "$EXIT_RELAY" "$relay_file names key version $relay_version, record is $recorded_version"
+      fail "$EXIT_RELAY" "$relay_file names $relay_version, record is $recorded_version"
     else
       ok "KEEPER in $relay_file is $recorded_address"
     fi
   fi
 fi
 
-if [ "$first_code" -eq 0 ]; then
-  log "all checks passed"
-fi
+[ "$first_code" -ne 0 ] || log "all checks passed"
 exit "$first_code"

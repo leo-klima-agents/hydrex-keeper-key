@@ -1,10 +1,6 @@
 #!/bin/sh
-# test/run.sh [--update] - run every script under dash against test/fake-gcloud
-# and compare the recorded gcloud call sequence (plus exit code, plus any files
-# written) with test/golden/<case>.txt. --update rewrites the goldens.
-#
-# TEST_SH picks the shell (default dash). Needs jq, openssl and cast on PATH;
-# gcloud must not be needed, the fake shadows it.
+# run.sh [--update]: every script under $TEST_SH (default dash) against
+# test/fake-gcloud, diffed against test/golden/<case>.txt.
 set -eu
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
@@ -26,16 +22,14 @@ ln -s "$root/test/fake-gcloud" "$tmp/bin/gcloud"
 PATH=$tmp/bin:$PATH
 export PATH
 
-# Nothing from the caller's environment may leak into the scripts under test.
 unset KEY_PROJECT KEEPER_PROJECT LOCATION KEY_RING KEY ADMIN_GROUP KEEPER_SA
 export FAKE_ADMIN_GROUP=hydrex-key-admins@example.com
 export FAKE_KEEPER_SA=hydrex-keeper@hydrex-keeper-rt-test.iam.gserviceaccount.com
 
 failures=0
-compare() { # compare NAME ACTUAL_FILE
+compare() { # NAME ACTUAL_FILE
   golden=$root/test/golden/$1.txt
-  # Exit 126 or 127 is a shell "cannot execute" or "not found": a broken
-  # script, never an intended outcome. Refuse to enshrine it.
+  # 126/127 means a broken script, never an intended golden.
   if grep -Eq '^exit=12[67]$' "$2"; then
     printf 'FAIL    %s: exit 126/127, the script is broken\n' "$1"
     cat "$tmp/$1.out"
@@ -57,9 +51,7 @@ compare() { # compare NAME ACTUAL_FILE
   fi
 }
 
-# capture NAME LABEL PATH: append a file the script under test should have
-# written to NAME's log, or "(missing)" so a script that wrote nothing is a
-# golden diff rather than an abort of the suite.
+# capture NAME LABEL PATH: append a written file, or "(missing)", to NAME's log.
 capture() {
   printf -- '--- %s ---\n' "$2" >>"$tmp/$1.log"
   if [ -f "$3" ]; then cat "$3" >>"$tmp/$1.log"; else printf '(missing)\n' >>"$tmp/$1.log"; fi
@@ -100,8 +92,7 @@ compare grant-existing "$tmp/grant-existing.log"
 run_case grant-no-keeper-sa existing admin-only "$fixtures/empty" grant.sh
 compare grant-no-keeper-sa "$tmp/grant-no-keeper-sa.log"
 
-# address.sh: the log also carries the files it wrote, and they must equal
-# test/fixtures/record, which the check cases read.
+# address.sh output must equal test/fixtures/record, which check cases read.
 mkdir "$tmp/record"
 run_case address existing admin-only "$tmp/record" address.sh
 {
@@ -117,8 +108,6 @@ elif ! diff -u "$fixtures/record/keeper.json" "$tmp/record/keeper.json" 2>&1 || 
   printf 'FAIL    address: record differs from test/fixtures/record\n'
   failures=$((failures + 1))
 fi
-# Re-running against the same key is fine; against a different key it refuses
-# unless --force is given.
 run_case address-same-key existing admin-only "$tmp/record" address.sh
 compare address-same-key "$tmp/address-same-key.log"
 mkdir "$tmp/record-other"
@@ -129,8 +118,6 @@ run_case address-other-key-force other-key admin-only "$tmp/record-other" addres
 capture address-other-key-force record/keeper.json "$tmp/record-other/keeper.json"
 capture address-other-key-force record/keeper.pem "$tmp/record-other/keeper.pem"
 compare address-other-key-force "$tmp/address-other-key-force.log"
-# A record for the same key whose PEM bytes differ (gcloud formatting change)
-# is refreshed, not refused.
 mkdir "$tmp/record-stale-pem"
 cp "$fixtures/record/keeper.pem" "$tmp/record-stale-pem/"
 jq '.pemSha256 = "0000"' "$fixtures/record/keeper.json" >"$tmp/record-stale-pem/keeper.json"
@@ -144,14 +131,11 @@ run_case address-malformed-record existing admin-only "$tmp/record-malformed" ad
 compare address-malformed-record "$tmp/address-malformed-record.log"
 run_case address-bad-args existing admin-only "$tmp/record" address.sh --force extra
 compare address-bad-args "$tmp/address-bad-args.log"
-# keeper.json intact but keeper.pem gone: regenerate, do not trust the hash.
 mkdir "$tmp/record-no-pem"
 cp "$fixtures/record/keeper.json" "$tmp/record-no-pem/"
 run_case address-missing-pem existing admin-only "$tmp/record-no-pem" address.sh
 capture address-missing-pem record/keeper.pem "$tmp/record-no-pem/keeper.pem"
 compare address-missing-pem "$tmp/address-missing-pem.log"
-# A record without pemSha256 (older format) is refreshed by address.sh and
-# rejected by check.sh with the record code, not a bare read failure.
 mkdir "$tmp/record-no-sha"
 cp "$fixtures/record/keeper.pem" "$tmp/record-no-sha/"
 jq 'del(.pemSha256)' "$fixtures/record/keeper.json" >"$tmp/record-no-sha/keeper.json"
@@ -180,7 +164,6 @@ compare check-record-newline "$tmp/check-record-newline.log"
 run_case address-pending pending admin-only "$tmp/record" address.sh
 compare address-pending "$tmp/address-pending.log"
 
-# check.sh: each drift has its own exit code.
 run_case check-ok existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-ok"
 compare check-ok "$tmp/check-ok.log"
 run_case check-no-record existing with-keeper "$fixtures/empty" check.sh

@@ -1,17 +1,11 @@
 #!/bin/sh
-# test/fake-gcloud - a gcloud stub for the golden tests. Never talks to GCP.
-#
-# Appends one line per call to $FAKE_GCLOUD_LOG and answers from canned state
-# chosen by $FAKE_GCLOUD_SCENARIO. Temp file paths are normalized in the log:
-# --output-file=... becomes --output-file=<file>, and the policy file handed to
-# set-iam-policy is replaced by its canonical JSON, so the golden shows the
-# exact policy the script would write. $FAKE_ADMIN_GROUP and $FAKE_KEEPER_SA
-# name the principals the canned policies contain.
+# gcloud stub for the golden tests. Logs each call to $FAKE_GCLOUD_LOG; answers
+# from canned state per $FAKE_GCLOUD_SCENARIO. In the log, --output-file paths
+# become <file> and set-iam-policy files become their canonical JSON.
 set -eu
 
 : "${FAKE_GCLOUD_LOG:?}" "${FAKE_GCLOUD_SCENARIO:?}" "${FAKE_ADMIN_GROUP:?}" "${FAKE_KEEPER_SA:?}"
 
-# --- scenario -> state ----------------------------------------------------------
 api_enabled=yes ring_exists=yes key_exists=yes key_window=10368000s
 key_policy=full project_audit=yes orgpolicy=enforced
 versions=one version_state=ENABLED pubkey=k1
@@ -23,11 +17,11 @@ case "$FAKE_GCLOUD_SCENARIO" in
   pending) version_state=PENDING_GENERATION ;;
   no-orgpolicy) orgpolicy='unset' ;;
   foreign-version) version_algorithm=EC_SIGN_P256_SHA256 version_protection=SOFTWARE ;;
-  fresh) # nothing exists yet
+  fresh)
     api_enabled=no ring_exists=no key_exists=no key_policy=none project_audit=no
     orgpolicy=unset version_state=PENDING_GENERATION ;;
-  existing) ;; # everything as setup.sh and grant.sh leave it
-  repair) # key exists but the surroundings drifted; org policy write is refused
+  existing) ;;
+  repair)
     key_policy=admin project_audit=no orgpolicy=denied ;;
   short-window) key_window=2592000s ;;
   foreign-key) key_exists=foreign ;;
@@ -40,7 +34,6 @@ case "$FAKE_GCLOUD_SCENARIO" in
   *) printf 'fake-gcloud: unknown scenario %s\n' "$FAKE_GCLOUD_SCENARIO" >&2; exit 98 ;;
 esac
 
-# --- canned material ------------------------------------------------------------
 pem_k1() {
   cat <<EOT
 -----BEGIN PUBLIC KEY-----
@@ -58,7 +51,7 @@ q6wJuVxwnuUa4Wj+pj3DOaPFhBlGbOru9/YyZTJm0OEjZDGpUM/lKg==
 EOT
 }
 
-key_json() { # key_json NAME
+key_json() { # NAME
   case "$key_exists" in
     foreign) key_algorithm=EC_SIGN_P256_SHA256 key_protection=SOFTWARE ;;
     *) key_algorithm=EC_SIGN_SECP256K1_SHA256 key_protection=HSM ;;
@@ -67,7 +60,7 @@ key_json() { # key_json NAME
     "$key_window" "$1" "$key_algorithm" "$key_protection"
 }
 
-version_json() { # version_json NAME STATE
+version_json() { # NAME STATE
   printf '{"algorithm":"%s","createTime":"2026-09-21T00:00:00Z","generateTime":"2026-09-21T00:00:01Z","name":"%s","protectionLevel":"%s","state":"%s"}' \
     "$version_algorithm" "$1" "$version_protection" "$2"
 }
@@ -97,7 +90,6 @@ project_policy_json() {
 }
 project_policy_etag() { project_policy_json | jq -r .etag; }
 
-# --- argument parsing -----------------------------------------------------------
 project='' location='' keyring='' key='' filter='' output_file=''
 for arg in "$@"; do
   case "$arg" in
@@ -110,16 +102,15 @@ for arg in "$@"; do
   esac
 done
 
-log_call() { # log_call ARGS... (already normalized)
+log_call() {
   printf 'gcloud %s\n' "$*" >>"$FAKE_GCLOUD_LOG"
 }
 
-# Verify a set-iam-policy file carries the etag we handed out, then log its
-# canonical content in place of the path.
-log_set_policy() { # log_set_policy EXPECTED_ETAG ARGS...
+# Requires the etag the fake handed out; logs canonical JSON in place of the path.
+log_set_policy() { # EXPECTED_ETAG ARGS...
   expected_etag=$1
   shift
-  file=$(eval "printf '%s' \"\$$#\"") # last argument
+  file=$(eval "printf '%s' \"\$$#\"")
   [ -f "$file" ] || { printf 'fake-gcloud: policy file %s missing\n' "$file" >&2; exit 97; }
   [ "$(jq -r '.etag // ""' "$file")" = "$expected_etag" ] || {
     printf 'fake-gcloud: policy etag %s, expected %s\n' "$(jq -r .etag "$file")" "$expected_etag" >&2
@@ -130,7 +121,6 @@ log_set_policy() { # log_set_policy EXPECTED_ETAG ARGS...
   log_call "${logged# } $(jq -c -S . "$file")"
 }
 
-# --- dispatch -------------------------------------------------------------------
 case "$*" in
   "version --format=json")
     log_call "$@"
@@ -188,8 +178,6 @@ case "$*" in
       case "$arg" in --output-file=*) logged="$logged --output-file=<file>" ;; *) logged="$logged $arg" ;; esac
     done
     log_call "${logged# }"
-    # No public key for a version that is not ENABLED, so the scripts' guard
-    # around get-public-key is exercised.
     if [ "$version_state" != ENABLED ]; then
       printf 'ERROR: (gcloud.kms.keys.versions.get-public-key) FAILED_PRECONDITION: version is %s\n' "$version_state" >&2
       exit 1

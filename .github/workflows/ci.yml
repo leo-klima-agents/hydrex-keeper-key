@@ -4,7 +4,7 @@ on:
   push:
   pull_request:
   schedule:
-    # Weekly drift check against the real key project. Monday 09:00 UTC.
+    # Weekly check.sh, Monday 09:00 UTC.
     - cron: "0 9 * * 1"
   workflow_dispatch:
 
@@ -12,7 +12,6 @@ permissions:
   contents: read
 
 jobs:
-  # Static checks. No GCP access.
   lint:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -32,8 +31,6 @@ jobs:
       - name: reuse lint
         uses: fsfe/reuse-action@v5
 
-  # Every script under dash against test/fake-gcloud, compared with the golden
-  # call sequences. A change to what the scripts would do shows up as a diff.
   golden:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -43,9 +40,7 @@ jobs:
       - name: Golden tests
         run: TEST_SH=dash test/run.sh
 
-  # The only job with GCP access: check.sh, read-only, through Workload
-  # Identity Federation. No stored secret. Configuration comes from repository
-  # variables (public material), never from config.env.
+  # Only job with GCP access. Read-only, via Workload Identity Federation, no secret.
   check:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
