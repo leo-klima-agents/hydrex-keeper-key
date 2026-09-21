@@ -21,6 +21,7 @@ EXIT_KEY_IAM=15        # key IAM policy differs from the rendered template
 EXIT_AUDIT=16          # project audit config lacks the KMS entry
 EXIT_RELAY=17          # KEEPER in the relay repo differs from the record
 EXIT_RECORD=18         # record/ missing or malformed
+EXIT_ORG_POLICY=19     # iam.disableServiceAccountKeyCreation not enforced on the key project
 
 # --- constants ----------------------------------------------------------------
 MIN_GCLOUD_VERSION=470.0.0
@@ -69,12 +70,14 @@ require_tool() {
 # digits and dots is not a version and never satisfies the pin.
 version_ge() {
   case "$1$2" in "" | *[!0-9.]*) return 1 ;; esac
-  IFS=. read -r have_1 have_2 have_3 <<EOT
+  # Only the first three components take part; gcloud versions have three.
+  IFS=. read -r have_1 have_2 have_3 have_rest <<EOT
 $1
 EOT
-  IFS=. read -r min_1 min_2 min_3 <<EOT
+  IFS=. read -r min_1 min_2 min_3 min_rest <<EOT
 $2
 EOT
+  : "$have_rest" "$min_rest"
   have_1=${have_1:-0} have_2=${have_2:-0} have_3=${have_3:-0}
   min_1=${min_1:-0} min_2=${min_2:-0} min_3=${min_3:-0}
   [ "$have_1" -gt "$min_1" ] && return 0
@@ -161,7 +164,9 @@ render_key_policy() {
 
 # Field readers. Each runs one jq over the resource and reads the fields line
 # by line. jq emits a final "end" line so the last field may be empty without
-# read hitting EOF (which would return 1 and, at top level, trip set -e).
+# read hitting EOF (which would return 1 and, at top level, trip set -e). The
+# readers are called inside conditions, where set -e is suspended, so a jq
+# failure (not JSON) dies explicitly instead of reading as drift.
 
 # read_key_attributes KEY_JSON: sets purpose, algorithm, protection and window
 # from a cryptoKey resource, and returns 0 if purpose, algorithm and protection
@@ -169,7 +174,8 @@ render_key_policy() {
 read_key_attributes() {
   key_fields=$(printf '%s\n' "$1" | jq -r '
     (.purpose // ""), (.versionTemplate.algorithm // ""),
-    (.versionTemplate.protectionLevel // ""), (.destroyScheduledDuration // ""), "end"')
+    (.versionTemplate.protectionLevel // ""), (.destroyScheduledDuration // ""), "end"') ||
+    die 1 "could not parse the cryptoKey resource returned by gcloud"
   {
     read -r purpose
     read -r algorithm
@@ -189,7 +195,8 @@ EOT
 # mutable; these are what the material actually has.
 read_version_attributes() {
   version_fields=$(printf '%s\n' "$1" | jq -r '
-    (.state // ""), (.algorithm // ""), (.protectionLevel // ""), "end"')
+    (.state // ""), (.algorithm // ""), (.protectionLevel // ""), "end"') ||
+    die 1 "could not parse the cryptoKeyVersion resource returned by gcloud"
   {
     read -r version_state
     read -r version_algorithm
@@ -203,17 +210,19 @@ EOT
 
 # read_record: loads record/keeper.json into recorded_version, recorded_address
 # and recorded_sha, or dies with EXIT_RECORD when the file is missing, empty,
-# not a JSON object, or has a field that is not a plain single-line string.
-# Missing fields read as empty; callers decide what that means.
+# holds more than one JSON document, is not an object, or has a field that is
+# not a plain single-line string. Missing fields read as empty; callers decide
+# what that means.
 read_record() {
   record_file=$RECORD_DIR/keeper.json
   [ -f "$record_file" ] || die "$EXIT_RECORD" "$record_file missing; run address.sh first"
-  record_fields=$(jq -r '
+  record_fields=$(jq -r -s '
     def field: (. // "") | if type != "string" or test("\\p{Cc}") then error("bad field") else . end;
-    if type == "object" then (.version | field), (.address | field), (.pemSha256 | field), "end"
-    else error("not a JSON object") end' "$record_file" 2>/dev/null) ||
-    die "$EXIT_RECORD" "$record_file is not a JSON object with plain string fields"
-  [ -n "$record_fields" ] || die "$EXIT_RECORD" "$record_file is empty"
+    if length != 1 then error("not exactly one JSON document")
+    elif (.[0] | type) != "object" then error("not a JSON object")
+    else .[0] | (.version | field), (.address | field), (.pemSha256 | field), "end" end' \
+    "$record_file" 2>/dev/null) ||
+    die "$EXIT_RECORD" "$record_file is not a single JSON object with plain string fields"
   {
     read -r recorded_version
     read -r recorded_address
@@ -224,6 +233,13 @@ EOT
 }
 
 # --- live key lookups ---------------------------------------------------------
+# find_keyring: prints the key ring resource name, or nothing when absent.
+find_keyring() {
+  find_keyring_list=$(gcloud kms keyrings list --project="$KEY_PROJECT" --location="$LOCATION" \
+    --filter="name=$KEY_RING_NAME" --format=json)
+  printf '%s\n' "$find_keyring_list" | jq -r --arg name "$KEY_RING_NAME" '.[] | select(.name == $name) | .name'
+}
+
 # find_key: prints the cryptoKey resource as JSON, or nothing when the key does
 # not exist. A filtered list makes absence a structured empty result instead of
 # an error message to parse; any other failure is gcloud's, exit 1.
@@ -231,6 +247,15 @@ find_key() {
   find_key_list=$(gcloud kms keys list --project="$KEY_PROJECT" --location="$LOCATION" --keyring="$KEY_RING" \
     --filter="name=$KEY_NAME" --format=json)
   printf '%s\n' "$find_key_list" | jq -c --arg name "$KEY_NAME" '.[] | select(.name == $name)'
+}
+
+# org_policy_enforced: returns 0 when iam.disableServiceAccountKeyCreation is
+# effectively enforced on the key project. A failed read is gcloud's failure,
+# exit 1, unless the caller catches it.
+org_policy_enforced() {
+  org_policy_json=$(gcloud resource-manager org-policies describe "$SA_KEY_CONSTRAINT" \
+    --project="$KEY_PROJECT" --effective --format=json)
+  [ "$(printf '%s\n' "$org_policy_json" | jq -r '.booleanPolicy.enforced // false')" = "true" ]
 }
 
 # describe_version_1: sets version_state, version_algorithm and
@@ -256,7 +281,7 @@ strip_solidity_comments() {
         c = substr(line, i, 1)
         d = substr(line, i, 2)
         if (state == "code") {
-          if (d == "//") { state = "line"; break }
+          if (d == "//") { state = "line"; printf " "; break }
           else if (d == "/*") { state = "block"; i++ }
           else if (c == "\"" || c == "\047") { quote = c; state = "string" }
           else printf "%s", c
@@ -278,7 +303,7 @@ normalize_policy() {
   jq -S '{
     bindings: ((.bindings // [])
       | map({role, members: ((.members // []) | sort)} + (if .condition then {condition} else {} end))
-      | sort_by(.role)),
+      | sort_by([.role, ((.condition // {}) | tojson)])),
     auditConfigs: ((.auditConfigs // [])
       | map({service, auditLogConfigs: ((.auditLogConfigs // [])
           | map({logType} + (if .exemptedMembers then {exemptedMembers: (.exemptedMembers | sort)} else {} end))

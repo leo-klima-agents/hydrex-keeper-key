@@ -34,9 +34,7 @@ fi
 
 # 2. Key ring
 log "== 2/7 key ring"
-ring=$(gcloud kms keyrings list --project="$KEY_PROJECT" --location="$LOCATION" \
-  --filter="name=$KEY_RING_NAME" --format=json |
-  jq -r --arg name "$KEY_RING_NAME" '.[] | select(.name == $name) | .name')
+ring=$(find_keyring)
 if [ "$ring" = "$KEY_RING_NAME" ]; then
   log "key ring exists: $KEY_RING_NAME"
 else
@@ -82,19 +80,16 @@ write_iam_if_changed "$KEY_PROJECT" "$project_policy" "$desired" projects
 # 6. Org policy: no service-account keys can ever be minted in this project.
 #    Read first; write only when the read succeeded and says not enforced.
 log "== 6/7 org policy"
-if effective=$(gcloud resource-manager org-policies describe "$SA_KEY_CONSTRAINT" \
-  --project="$KEY_PROJECT" --effective --format=json 2>"$TMP/orgpolicy.err"); then
-  if [ "$(printf '%s\n' "$effective" | jq -r '.booleanPolicy.enforced // false')" = "true" ]; then
-    log "$SA_KEY_CONSTRAINT already enforced on $KEY_PROJECT (directly or inherited)"
-  elif gcloud resource-manager org-policies enable-enforce "$SA_KEY_CONSTRAINT" --project="$KEY_PROJECT" >/dev/null 2>"$TMP/orgpolicy.err"; then
-    log "$SA_KEY_CONSTRAINT now enforced on $KEY_PROJECT"
-  else
-    log "WARNING: could not enforce $SA_KEY_CONSTRAINT on $KEY_PROJECT: $(cat "$TMP/orgpolicy.err")"
-    log "WARNING: needs orgpolicy.policy.set. Ask an org admin to set it, or inherit it from the folder."
-  fi
-else
+if org_policy_enforced 2>"$TMP/orgpolicy.err"; then
+  log "$SA_KEY_CONSTRAINT already enforced on $KEY_PROJECT (directly or inherited)"
+elif [ -s "$TMP/orgpolicy.err" ]; then
   log "WARNING: could not read the effective $SA_KEY_CONSTRAINT policy on $KEY_PROJECT: $(cat "$TMP/orgpolicy.err")"
   log "WARNING: not attempting to set it. Check by hand or re-run once the read works."
+elif gcloud resource-manager org-policies enable-enforce "$SA_KEY_CONSTRAINT" --project="$KEY_PROJECT" >/dev/null 2>"$TMP/orgpolicy.err"; then
+  log "$SA_KEY_CONSTRAINT now enforced on $KEY_PROJECT"
+else
+  log "WARNING: could not enforce $SA_KEY_CONSTRAINT on $KEY_PROJECT: $(cat "$TMP/orgpolicy.err")"
+  log "WARNING: needs orgpolicy.policy.set. Ask an org admin to set it, or inherit it from the folder."
 fi
 
 # 7. Version 1

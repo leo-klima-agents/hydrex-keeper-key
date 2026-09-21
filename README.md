@@ -46,7 +46,7 @@ Operator IAM, for the human running the scripts:
 | `setup.sh` step 6 | organisation or folder | `roles/orgpolicy.policyAdmin`, optional; without it the step reports and moves on |
 | `address.sh` | key | `roles/cloudkms.admin` through the admin group |
 | `grant.sh` | key, and keeper project | `roles/cloudkms.admin` through the admin group; `roles/iam.serviceAccountViewer` on the keeper project |
-| `check.sh` | key project | `roles/viewer` and `roles/cloudkms.publicKeyViewer`, project level |
+| `check.sh` | key project | `roles/viewer` (includes `orgpolicy.policy.get`) and `roles/cloudkms.publicKeyViewer`, project level |
 
 Run `setup.sh` as a member of the admin group who is also an owner of the key project. Owners are the real root of trust here (see "Manual steps").
 
@@ -91,7 +91,7 @@ git commit -m "record: keeper key version 1"
 
 Prints the checksummed address and writes `record/`. The address is the property of key version 1 alone.
 
-Re-running it against the same key writes nothing and exits 0, judged on the files on disk, so a deleted or edited `keeper.pem` is regenerated. If `record/keeper.json` already exists and names a different key version or address, it refuses with exit 18 rather than overwrite the record that `check.sh` and part one's `KEEPER` are pinned to. `sh/address.sh --force` overrides that, for the case where a new key and therefore a new module are intended. A record for the same key and address whose PEM bytes differ, which can only be a formatting change in gcloud's output, is refreshed without ceremony.
+Re-running it against the same key writes nothing and exits 0, judged on the files on disk, so a deleted or edited `keeper.pem` is regenerated. Both files are written to a temporary directory and moved into place, so an interrupted run cannot leave a truncated record. If `record/keeper.json` already exists and names a different key version or address, it refuses with exit 18 rather than overwrite the record that `check.sh` and part one's `KEEPER` are pinned to. `sh/address.sh --force` overrides that, for the case where a new key and therefore a new module are intended. A record for the same key and address whose PEM bytes differ, which can only be a formatting change in gcloud's output, is refreshed without ceremony.
 
 ### The derivation, by hand
 
@@ -145,9 +145,9 @@ sh/check.sh                       # against the live key project
 sh/check.sh ../hydrex-conduit-executor   # also compares KEEPER in script/Deploy.s.sol
 ```
 
-It re-derives the address from the live key and compares it with `record/`, asserts version 1 is `ENABLED` and is the only version, that the key's purpose, algorithm, protection level and destroy window are unchanged, that version 1's own algorithm and protection level are secp256k1 and HSM (the key's template is mutable; the version's material is not), that the key's IAM policy equals the rendered template exactly, and that the project audit config still contains the KMS entry. Every check runs; every failure is printed; the exit code is the first failure's. A failed `gcloud` call is exit 1 with gcloud's message, never reported as drift. Key existence is a filtered `list`, so a key that is gone is a structured empty result and exit 10, not an error message to parse; a misspelled key ring or project is gcloud's error, exit 1. When version 1 is not an `ENABLED` secp256k1 HSM version the address check is skipped, since the derivation does not apply, and exits 10, 12 or 13 already name the problem.
+It re-derives the address from the live key and compares it with `record/`, asserts version 1 is `ENABLED` and is the only version, that the key's purpose, algorithm, protection level and destroy window are unchanged, that version 1's own algorithm and protection level are secp256k1 and HSM (the key's template is mutable; the version's material is not), that the key's IAM policy equals the rendered template exactly, that the project audit config still contains the KMS entry, and that `iam.disableServiceAccountKeyCreation` is effectively enforced on the key project. Every check runs; every failure is printed; the exit code is the first failure's. A failed `gcloud` call is exit 1 with gcloud's message, never reported as drift. Key existence is a filtered `list`, so a key that is gone is a structured empty result and exit 10, not an error message to parse; a misspelled key ring or project is gcloud's error, exit 1. When version 1 is not an `ENABLED` secp256k1 HSM version the address check is skipped, since the derivation does not apply, and exits 10, 12 or 13 already name the problem.
 
-The relay comparison looks for the one `KEEPER = 0x…` assignment in `script/Deploy.s.sol` (also wrapped in any number of `address(…)` or `payable(…)` casts) after a single pass that removes `//` and `/* */` comments and string literals and joins lines. A commented-out old value, a URL inside a comment or a string, a `KEEPER_*` identifier, a `KEEPER ==` comparison or a formatter-wrapped assignment do not confuse it. Two different assignments are exit 17 as well; part one must keep exactly one.
+The relay comparison looks for the one `KEEPER = 0x…` assignment in `script/Deploy.s.sol` (also wrapped in any number of `address(…)` or `payable(…)` casts) after a single pass that removes `//` and `/* */` comments and string literals and joins lines. A commented-out old value, a URL inside a comment or a string, a `KEEPER_*` or `$KEEPER` identifier, a `cfg.KEEPER` member, a `KEEPER ==` comparison, a longer hex literal or a formatter-wrapped assignment do not confuse it. Two different assignments are exit 17 as well; part one must keep exactly one.
 
 `check.sh` renders the expected policy from your config, so once `grant.sh` has run, `KEEPER_SA` must be set wherever `check.sh` runs (config.env locally, the repository variable in CI), or the live grant reads as drift with exit 15.
 
@@ -166,6 +166,7 @@ The relay comparison looks for the one `KEEPER = 0x…` assignment in `script/De
 | 16 | project audit config lacks the KMS entry |
 | 17 | `KEEPER` in the relay repo differs from the record |
 | 18 | `record/` missing or malformed |
+| 19 | `iam.disableServiceAccountKeyCreation` is not enforced on the key project |
 
 The same codes are used by `setup.sh` (2, 3, 10, 11) and `address.sh` (2, 3, 10, 12, 18).
 

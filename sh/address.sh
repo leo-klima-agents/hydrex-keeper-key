@@ -51,8 +51,9 @@ if [ -f "$RECORD_DIR/keeper.json" ] && [ "$force" = no ]; then
   log "record names the same key and address; refreshing keeper.pem and pemSha256"
 fi
 
+# Both files are written in $TMP and moved into place, JSON last, so an
+# interrupt or a failed jq cannot leave a truncated record behind.
 mkdir -p "$RECORD_DIR"
-cp "$pem" "$RECORD_DIR/keeper.pem"
 jq -n \
   --arg key "$KEY_NAME" \
   --arg version "$KEY_VERSION_NAME" \
@@ -61,7 +62,10 @@ jq -n \
   --arg address "$address" \
   --arg pemSha256 "$pem_sha" \
   '{key: $key, version: $version, algorithm: $algorithm, protectionLevel: $protectionLevel, address: $address, pemSha256: $pemSha256}' \
-  >"$RECORD_DIR/keeper.json"
+  >"$TMP/keeper.json"
+cp "$pem" "$TMP/keeper.pem.new"
+mv "$TMP/keeper.pem.new" "$RECORD_DIR/keeper.pem"
+mv "$TMP/keeper.json" "$RECORD_DIR/keeper.json"
 
 log "wrote $RECORD_DIR/keeper.pem and $RECORD_DIR/keeper.json; commit both"
 printf '%s\n' "$address"
