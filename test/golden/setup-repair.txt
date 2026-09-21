@@ -1,0 +1,13 @@
+gcloud version --format=json
+gcloud services list --enabled --project=hydrex-keeper-key-test --filter=config.name=cloudkms.googleapis.com --format=value(config.name)
+gcloud kms keyrings list --project=hydrex-keeper-key-test --location=us --filter=name=projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper --format=json
+gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --filter=name=projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/keeper --format=json
+gcloud kms keys update projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/keeper --destroy-scheduled-duration=120d
+gcloud kms keys get-iam-policy projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/keeper --format=json
+gcloud kms keys set-iam-policy projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/keeper {"bindings":[{"members":["group:hydrex-key-admins@example.com"],"role":"roles/cloudkms.admin"},{"members":["serviceAccount:hydrex-keeper@hydrex-keeper-rt-test.iam.gserviceaccount.com"],"role":"roles/cloudkms.publicKeyViewer"},{"members":["serviceAccount:hydrex-keeper@hydrex-keeper-rt-test.iam.gserviceaccount.com"],"role":"roles/cloudkms.signer"}],"etag":"BwKeyAdmin"}
+gcloud projects get-iam-policy hydrex-keeper-key-test --format=json
+gcloud projects set-iam-policy hydrex-keeper-key-test {"auditConfigs":[{"auditLogConfigs":[{"logType":"ADMIN_READ"}],"service":"allServices"},{"auditLogConfigs":[{"logType":"ADMIN_READ"},{"logType":"DATA_READ"},{"logType":"DATA_WRITE"}],"service":"cloudkms.googleapis.com"}],"bindings":[{"members":["group:hydrex-key-admins@example.com"],"role":"roles/owner"}],"etag":"BwProjPlain","version":1}
+gcloud resource-manager org-policies describe iam.disableServiceAccountKeyCreation --project=hydrex-keeper-key-test --effective --format=json
+gcloud resource-manager org-policies enable-enforce iam.disableServiceAccountKeyCreation --project=hydrex-keeper-key-test
+gcloud kms keys versions describe projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/keeper/cryptoKeyVersions/1 --format=json
+exit=0

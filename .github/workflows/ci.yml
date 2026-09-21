@@ -1,0 +1,72 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  schedule:
+    # Weekly drift check against the real key project. Monday 09:00 UTC.
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Static checks. No GCP access.
+  lint:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck and checkbashisms
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck devscripts
+      - name: sh -n
+        run: |
+          for f in sh/*.sh test/fake-gcloud test/run.sh; do sh -n "$f"; done
+      - name: shellcheck
+        run: shellcheck -s sh -x sh/*.sh test/fake-gcloud test/run.sh
+      - name: checkbashisms
+        run: checkbashisms sh/*.sh test/fake-gcloud test/run.sh
+      - name: reuse lint
+        uses: fsfe/reuse-action@v5
+
+  # Every script under dash against test/fake-gcloud, compared with the golden
+  # call sequences. A change to what the scripts would do shows up as a diff.
+  golden:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: Golden tests
+        run: TEST_SH=dash test/run.sh
+
+  # The only job with GCP access: check.sh, read-only, through Workload
+  # Identity Federation. No stored secret. Configuration comes from repository
+  # variables (public material), never from config.env.
+  check:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      KEY_PROJECT: ${{ vars.KEY_PROJECT }}
+      KEEPER_PROJECT: ${{ vars.KEEPER_PROJECT }}
+      LOCATION: ${{ vars.LOCATION }}
+      KEY_RING: ${{ vars.KEY_RING }}
+      KEY: ${{ vars.KEY }}
+      ADMIN_GROUP: ${{ vars.ADMIN_GROUP }}
+      KEEPER_SA: ${{ vars.KEEPER_SA }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          project_id: ${{ vars.KEY_PROJECT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: check.sh
+        run: sh/check.sh

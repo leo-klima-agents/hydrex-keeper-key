@@ -1,0 +1,9 @@
+version = 1
+SPDX-PackageName = "hydrex-keeper-key"
+SPDX-PackageSupplier = "leo-klima-agents"
+
+[[annotations]]
+path = "**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 leo-klima-agents"
+SPDX-License-Identifier = "MIT"
