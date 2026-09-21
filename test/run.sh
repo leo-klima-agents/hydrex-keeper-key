@@ -52,6 +52,14 @@ compare() { # compare NAME ACTUAL_FILE
   fi
 }
 
+# capture NAME LABEL PATH: append a file the script under test should have
+# written to NAME's log, or "(missing)" so a script that wrote nothing is a
+# golden diff rather than an abort of the suite.
+capture() {
+  printf -- '--- %s ---\n' "$2" >>"$tmp/$1.log"
+  if [ -f "$3" ]; then cat "$3" >>"$tmp/$1.log"; else printf '(missing)\n' >>"$tmp/$1.log"; fi
+}
+
 # run_case NAME SCENARIO CONFIG RECORD_DIR SCRIPT [ARGS...]
 run_case() {
   name=$1 scenario=$2 config=$3 record_dir=$4 script=$5
@@ -94,15 +102,13 @@ run_case address existing admin-only "$tmp/record" address.sh
 {
   printf -- '--- stdout ---\n'
   grep -v '^wrote ' "$tmp/address.out" || true
-  printf -- '--- record/keeper.json ---\n'
-  cat "$tmp/record/keeper.json"
-  printf -- '--- record/keeper.pem ---\n'
-  cat "$tmp/record/keeper.pem"
-} >>"$tmp/address.log" 2>&1
+} >>"$tmp/address.log"
+capture address record/keeper.json "$tmp/record/keeper.json"
+capture address record/keeper.pem "$tmp/record/keeper.pem"
 compare address "$tmp/address.log"
 if [ "$update" = yes ]; then
   cp "$tmp/record/keeper.json" "$tmp/record/keeper.pem" "$fixtures/record/"
-elif ! diff -u "$fixtures/record/keeper.json" "$tmp/record/keeper.json" || ! diff -u "$fixtures/record/keeper.pem" "$tmp/record/keeper.pem"; then
+elif ! diff -u "$fixtures/record/keeper.json" "$tmp/record/keeper.json" 2>&1 || ! diff -u "$fixtures/record/keeper.pem" "$tmp/record/keeper.pem" 2>&1; then
   printf 'FAIL    address: record differs from test/fixtures/record\n'
   failures=$((failures + 1))
 fi
@@ -115,12 +121,8 @@ cp "$fixtures/record/keeper.json" "$fixtures/record/keeper.pem" "$tmp/record-oth
 run_case address-other-key other-key admin-only "$tmp/record-other" address.sh
 compare address-other-key "$tmp/address-other-key.log"
 run_case address-other-key-force other-key admin-only "$tmp/record-other" address.sh --force
-{
-  printf -- '--- record/keeper.json ---\n'
-  cat "$tmp/record-other/keeper.json"
-  printf -- '--- record/keeper.pem ---\n'
-  cat "$tmp/record-other/keeper.pem"
-} >>"$tmp/address-other-key-force.log"
+capture address-other-key-force record/keeper.json "$tmp/record-other/keeper.json"
+capture address-other-key-force record/keeper.pem "$tmp/record-other/keeper.pem"
 compare address-other-key-force "$tmp/address-other-key-force.log"
 # A record for the same key whose PEM bytes differ (gcloud formatting change)
 # is refreshed, not refused.
@@ -128,8 +130,7 @@ mkdir "$tmp/record-stale-pem"
 cp "$fixtures/record/keeper.pem" "$tmp/record-stale-pem/"
 jq '.pemSha256 = "0000"' "$fixtures/record/keeper.json" >"$tmp/record-stale-pem/keeper.json"
 run_case address-refresh-pem existing admin-only "$tmp/record-stale-pem" address.sh
-printf -- '--- record/keeper.json ---\n' >>"$tmp/address-refresh-pem.log"
-cat "$tmp/record-stale-pem/keeper.json" >>"$tmp/address-refresh-pem.log"
+capture address-refresh-pem record/keeper.json "$tmp/record-stale-pem/keeper.json"
 compare address-refresh-pem "$tmp/address-refresh-pem.log"
 mkdir "$tmp/record-malformed"
 printf 'not json\n' >"$tmp/record-malformed/keeper.json"
@@ -142,8 +143,7 @@ compare address-bad-args "$tmp/address-bad-args.log"
 mkdir "$tmp/record-no-pem"
 cp "$fixtures/record/keeper.json" "$tmp/record-no-pem/"
 run_case address-missing-pem existing admin-only "$tmp/record-no-pem" address.sh
-printf -- '--- record/keeper.pem ---\n' >>"$tmp/address-missing-pem.log"
-cat "$tmp/record-no-pem/keeper.pem" >>"$tmp/address-missing-pem.log"
+capture address-missing-pem record/keeper.pem "$tmp/record-no-pem/keeper.pem"
 compare address-missing-pem "$tmp/address-missing-pem.log"
 # A record without pemSha256 (older format) is refreshed by address.sh and
 # rejected by check.sh with the record code, not a bare read failure.
@@ -153,15 +153,26 @@ jq 'del(.pemSha256)' "$fixtures/record/keeper.json" >"$tmp/record-no-sha/keeper.
 run_case check-record-no-sha existing with-keeper "$tmp/record-no-sha" check.sh
 compare check-record-no-sha "$tmp/check-record-no-sha.log"
 run_case address-record-no-sha existing admin-only "$tmp/record-no-sha" address.sh
-printf -- '--- record/keeper.json ---\n' >>"$tmp/address-record-no-sha.log"
-cat "$tmp/record-no-sha/keeper.json" >>"$tmp/address-record-no-sha.log"
+capture address-record-no-sha record/keeper.json "$tmp/record-no-sha/keeper.json"
 compare address-record-no-sha "$tmp/address-record-no-sha.log"
 mkdir "$tmp/record-array"
 printf '[1,2]\n' >"$tmp/record-array/keeper.json"
 cp "$fixtures/record/keeper.pem" "$tmp/record-array/"
 run_case check-record-not-object existing with-keeper "$tmp/record-array" check.sh
 compare check-record-not-object "$tmp/check-record-not-object.log"
-run_case address-pending fresh admin-only "$tmp/record" address.sh
+mkdir "$tmp/record-empty"
+: >"$tmp/record-empty/keeper.json"
+cp "$fixtures/record/keeper.pem" "$tmp/record-empty/"
+run_case check-record-empty existing with-keeper "$tmp/record-empty" check.sh
+compare check-record-empty "$tmp/check-record-empty.log"
+run_case address-record-empty existing admin-only "$tmp/record-empty" address.sh
+compare address-record-empty "$tmp/address-record-empty.log"
+mkdir "$tmp/record-newline"
+jq '.version = "a\nb"' "$fixtures/record/keeper.json" >"$tmp/record-newline/keeper.json"
+cp "$fixtures/record/keeper.pem" "$tmp/record-newline/"
+run_case check-record-newline existing with-keeper "$tmp/record-newline" check.sh
+compare check-record-newline "$tmp/check-record-newline.log"
+run_case address-pending pending admin-only "$tmp/record" address.sh
 compare address-pending "$tmp/address-pending.log"
 
 # check.sh: each drift has its own exit code.
@@ -201,6 +212,12 @@ run_case check-relay-decoy existing with-keeper "$fixtures/record" check.sh "$fi
 compare check-relay-decoy "$tmp/check-relay-decoy.log"
 run_case check-relay-ambiguous existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-ambiguous"
 compare check-relay-ambiguous "$tmp/check-relay-ambiguous.log"
+run_case check-bad-args existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-ok" extra
+compare check-bad-args "$tmp/check-bad-args.log"
+run_case check-no-versions no-versions with-keeper "$fixtures/record" check.sh
+compare check-no-versions "$tmp/check-no-versions.log"
+run_case address-no-key no-key admin-only "$tmp/record" address.sh
+compare address-no-key "$tmp/address-no-key.log"
 
 if [ "$failures" -ne 0 ]; then
   printf '%s golden case(s) failed\n' "$failures"

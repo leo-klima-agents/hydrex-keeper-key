@@ -12,6 +12,7 @@ script_dir=$(dirname -- "$0")
 # shellcheck source=sh/lib.sh
 . "$script_dir/lib.sh"
 
+[ $# -le 1 ] || die "$EXIT_CONFIG" "usage: $0 [RELAY_REPO_DIR]"
 require_tools openssl cast
 load_config
 make_tmp
@@ -38,16 +39,10 @@ fi
 [ "$(sha256_file "$RECORD_DIR/keeper.pem")" = "$recorded_sha" ] ||
   die "$EXIT_RECORD" "record/keeper.pem does not match pemSha256 in keeper.json"
 
-# Key attributes
-# A key that is gone is exit 10; any other describe failure is a gcloud
-# failure, exit 1, with gcloud's message.
-if ! key=$(gcloud kms keys describe "$KEY_NAME" --format=json 2>"$TMP/describe.err"); then
-  cat "$TMP/describe.err" >&2
-  if grep -q NOT_FOUND "$TMP/describe.err"; then
-    die "$EXIT_KEY_ATTRIBUTES" "key $KEY_NAME not found"
-  fi
-  die 1 "could not describe $KEY_NAME"
-fi
+# Key attributes. Absence is a structured empty lookup, exit 10; any other
+# failure is gcloud's, exit 1 with its message.
+key=$(find_key)
+[ -n "$key" ] || die "$EXIT_KEY_ATTRIBUTES" "key $KEY_NAME not found"
 if read_key_attributes "$key"; then
   ok "key is $purpose $algorithm $protection"
 else
@@ -60,24 +55,35 @@ else
 fi
 
 # Versions: exactly one, and it is version 1, ENABLED, with the expected
-# algorithm and protection level of its own.
+# algorithm and protection level of its own. One jq pass over the list; one
+# failure per distinct fact.
 versions=$(gcloud kms keys versions list --project="$KEY_PROJECT" --location="$LOCATION" \
   --keyring="$KEY_RING" --key="$KEY" --format=json)
-count=$(printf '%s\n' "$versions" | jq 'length')
-listed=$(printf '%s\n' "$versions" | jq -r '.[] | " \(.name | split("/") | last)=\(.state)"' | tr -d '\n')
-version1=$(printf '%s\n' "$versions" | jq -c --arg name "$KEY_VERSION_NAME" '.[] | select(.name == $name)')
-if [ "$count" -eq 1 ] && [ -n "$version1" ]; then
-  ok "one key version, and it is version 1"
-elif [ "$count" -eq 1 ]; then
-  fail "$EXIT_VERSION_COUNT" "the only key version is not version 1:$listed"
-else
-  fail "$EXIT_VERSION_COUNT" "$count key versions exist; the address is the property of version 1 alone:$listed"
-fi
-version_ok=no
+version_fields=$(printf '%s\n' "$versions" | jq -r --arg name "$KEY_VERSION_NAME" '
+  length,
+  ([.[] | "\(.name | split("/") | last)=\(.state)"] | join(" ")),
+  ((map(select(.name == $name)) | first) // "" | if . == "" then "" else tojson end),
+  "end"')
+{
+  read -r count
+  read -r listed
+  read -r version1
+} <<EOT
+$version_fields
+EOT
+version_state=missing version_ok=no
 if [ -z "$version1" ]; then
-  fail "$EXIT_VERSION_STATE" "version 1 is missing"
-  version_state=missing
+  if [ "$count" -eq 0 ]; then
+    fail "$EXIT_VERSION_COUNT" "no key versions exist"
+  else
+    fail "$EXIT_VERSION_COUNT" "version 1 is missing; versions present: $listed"
+  fi
 else
+  if [ "$count" -eq 1 ]; then
+    ok "one key version, and it is version 1"
+  else
+    fail "$EXIT_VERSION_COUNT" "$count key versions exist; the address is the property of version 1 alone: $listed"
+  fi
   if read_version_attributes "$version1"; then
     ok "version 1 is $version_algorithm $version_protection"
     version_ok=yes
@@ -113,30 +119,28 @@ else
 fi
 
 # Key IAM equals the rendered template exactly. Reads are assigned before they
-# are normalized so a failed gcloud call aborts instead of reading as drift.
-live_policy_raw=$(get_iam "$KEY_NAME" kms keys)
-live_policy=$(printf '%s\n' "$live_policy_raw" | normalize_policy)
-expected_policy_raw=$(render_key_policy)
-expected_policy=$(printf '%s\n' "$expected_policy_raw" | normalize_policy)
-if [ "$live_policy" = "$expected_policy" ]; then
-  ok "key IAM policy matches policy/key.iam.json.tmpl"
-else
+# are compared so a failed gcloud call aborts instead of reading as drift.
+live_policy=$(get_iam "$KEY_NAME" kms keys)
+expected_policy=$(render_key_policy)
+if policy_differs "$live_policy" "$expected_policy"; then
   fail "$EXIT_KEY_IAM" "key IAM policy differs from the rendered template"
-  printf '%s\n' "$expected_policy" >"$TMP/expected.json"
-  printf '%s\n' "$live_policy" >"$TMP/live.json"
+  printf '%s\n' "$desired_norm" >"$TMP/expected.json"
+  printf '%s\n' "$live_norm" >"$TMP/live.json"
   diff -u "$TMP/expected.json" "$TMP/live.json" >&2 || true
+else
+  ok "key IAM policy matches policy/key.iam.json.tmpl"
 fi
 
 # Project audit config still holds the KMS entry.
-project_policy_raw=$(get_iam "$KEY_PROJECT" projects)
-live_audit=$(printf '%s\n' "$project_policy_raw" |
+project_policy=$(get_iam "$KEY_PROJECT" projects)
+live_audit=$(printf '%s\n' "$project_policy" |
   jq -c --slurpfile audit "$POLICY_DIR/audit.json" \
-    '{auditConfigs: ((.auditConfigs // []) | map(select(.service == $audit[0].service)))}' | normalize_policy)
-expected_audit=$(jq -c '{auditConfigs: [.]}' "$POLICY_DIR/audit.json" | normalize_policy)
-if [ "$live_audit" = "$expected_audit" ]; then
-  ok "project audit config has the $KMS_SERVICE entry"
-else
+    '{auditConfigs: ((.auditConfigs // []) | map(select(.service == $audit[0].service)))}')
+expected_audit=$(jq -c '{auditConfigs: [.]}' "$POLICY_DIR/audit.json")
+if policy_differs "$live_audit" "$expected_audit"; then
   fail "$EXIT_AUDIT" "project audit config lacks the expected $KMS_SERVICE entry"
+else
+  ok "project audit config has the $KMS_SERVICE entry"
 fi
 
 # Relay repo (optional)
@@ -148,11 +152,13 @@ if [ -n "$relay_dir" ]; then
     # The KEEPER assignment itself, in the source with comments and string
     # literals removed and lines joined: not a commented-out old value, not a
     # KEEPER_* identifier, not a `KEEPER ==` comparison, and wrapped
-    # assignments still match. The literal may be wrapped in address(...) or
-    # payable(...). Exactly one distinct address is required.
+    # assignments still match. The literal may be wrapped in any number of
+    # address(...) or payable(...) casts. `$` is an identifier character in
+    # Solidity, so `$KEEPER` is not KEEPER. Exactly one distinct address is
+    # required.
     relay_addresses=$(strip_solidity_comments <"$deploy" |
-      grep -Eo '(^|[^A-Za-z0-9_])KEEPER[[:space:]]*=[[:space:]]*((address|payable)\([[:space:]]*)?0x[0-9a-fA-F]{40}' |
-      grep -Eo '0x[0-9a-fA-F]{40}' | tr 'A-F' 'a-f' | sort -u || true)
+      grep -Eo '(^|[^A-Za-z0-9_$])KEEPER[[:space:]]*=[[:space:]]*((address|payable)\([[:space:]]*)*0x[0-9a-fA-F]{40}' |
+      grep -Eo '0x[0-9a-fA-F]{40}' | tr 'A-F' 'a-f' | sort -u)
     relay_count=$(printf '%s' "$relay_addresses" | grep -c . || true)
     relay_keeper=$(printf '%s' "$relay_addresses" | head -n 1)
     if [ "$relay_count" -eq 0 ]; then

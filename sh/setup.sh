@@ -9,7 +9,9 @@
 # 4. Write the complete key IAM policy from policy/key.iam.json.tmpl.
 # 5. Write the KMS Data Access audit config into the project IAM policy.
 # 6. Enforce iam.disableServiceAccountKeyCreation on the project, if permitted.
-# 7. Print the key version resource name and its state.
+# 7. Print the key version resource name and its state. Stops with exit 10 if
+#    version 1's own algorithm or protection level are not the expected ones
+#    (the key's template is mutable; the version's material is not).
 set -eu
 script_dir=$(dirname -- "$0")
 # shellcheck source=sh/lib.sh
@@ -44,9 +46,7 @@ fi
 
 # 3. Key
 log "== 3/7 key"
-key=$(gcloud kms keys list --project="$KEY_PROJECT" --location="$LOCATION" --keyring="$KEY_RING" \
-  --filter="name=$KEY_NAME" --format=json |
-  jq -c --arg name "$KEY_NAME" '.[] | select(.name == $name)')
+key=$(find_key)
 if [ -z "$key" ]; then
   log "creating key $KEY_NAME ($KEY_PURPOSE, $KEY_ALGORITHM, $KEY_PROTECTION, destroy window $DESTROY_WINDOW)"
   gcloud kms keys create "$KEY_NAME" \
@@ -86,7 +86,7 @@ if effective=$(gcloud resource-manager org-policies describe "$SA_KEY_CONSTRAINT
   --project="$KEY_PROJECT" --effective --format=json 2>"$TMP/orgpolicy.err"); then
   if [ "$(printf '%s\n' "$effective" | jq -r '.booleanPolicy.enforced // false')" = "true" ]; then
     log "$SA_KEY_CONSTRAINT already enforced on $KEY_PROJECT (directly or inherited)"
-  elif gcloud resource-manager org-policies enable-enforce "$SA_KEY_CONSTRAINT" --project="$KEY_PROJECT" 2>"$TMP/orgpolicy.err"; then
+  elif gcloud resource-manager org-policies enable-enforce "$SA_KEY_CONSTRAINT" --project="$KEY_PROJECT" >/dev/null 2>"$TMP/orgpolicy.err"; then
     log "$SA_KEY_CONSTRAINT now enforced on $KEY_PROJECT"
   else
     log "WARNING: could not enforce $SA_KEY_CONSTRAINT on $KEY_PROJECT: $(cat "$TMP/orgpolicy.err")"
@@ -99,9 +99,7 @@ fi
 
 # 7. Version 1
 log "== 7/7 key version"
-version=$(gcloud kms keys versions describe "$KEY_VERSION_NAME" --format=json)
-read_version_attributes "$version" ||
-  die "$EXIT_KEY_ATTRIBUTES" "version 1 is algorithm=$version_algorithm protectionLevel=$version_protection"
+describe_version_1
 log "state: $version_state"
 [ "$version_state" = "ENABLED" ] ||
   log "version 1 is $version_state; HSM generation takes a moment. Run address.sh once it is ENABLED."

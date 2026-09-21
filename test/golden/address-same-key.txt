@@ -1,4 +1,5 @@
 gcloud version --format=json
+gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --filter=name=projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/keeper --format=json
 gcloud kms keys versions describe projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/keeper/cryptoKeyVersions/1 --format=json
 gcloud kms keys versions get-public-key projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/keeper/cryptoKeyVersions/1 --output-file=<file>
 exit=0

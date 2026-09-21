@@ -65,8 +65,10 @@ require_tool() {
   command -v "$1" >/dev/null 2>&1 || die "$EXIT_DEPENDENCY" "$1 not found on PATH$2"
 }
 
-# version_ge HAVE MIN: true if dotted version HAVE >= MIN.
+# version_ge HAVE MIN: true if dotted version HAVE >= MIN. Anything that is not
+# digits and dots is not a version and never satisfies the pin.
 version_ge() {
+  case "$1$2" in "" | *[!0-9.]*) return 1 ;; esac
   IFS=. read -r have_1 have_2 have_3 <<EOT
 $1
 EOT
@@ -95,7 +97,10 @@ require_tools() {
     esac
   done
   gcloud_version_json=$(gcloud version --format=json)
-  gcloud_version=$(printf '%s\n' "$gcloud_version_json" | jq -r '."Google Cloud SDK"')
+  gcloud_version=$(printf '%s\n' "$gcloud_version_json" | jq -r '."Google Cloud SDK" // ""')
+  case "$gcloud_version" in
+    "" | *[!0-9.]*) die "$EXIT_DEPENDENCY" "could not parse the gcloud version from 'gcloud version --format=json' (got '$gcloud_version')" ;;
+  esac
   version_ge "$gcloud_version" "$MIN_GCLOUD_VERSION" ||
     die "$EXIT_DEPENDENCY" "gcloud $gcloud_version is older than the pinned minimum $MIN_GCLOUD_VERSION"
 }
@@ -197,15 +202,18 @@ EOT
 }
 
 # read_record: loads record/keeper.json into recorded_version, recorded_address
-# and recorded_sha, or dies with EXIT_RECORD when the file is missing or is not
-# a JSON object. Missing fields read as empty; callers decide what that means.
+# and recorded_sha, or dies with EXIT_RECORD when the file is missing, empty,
+# not a JSON object, or has a field that is not a plain single-line string.
+# Missing fields read as empty; callers decide what that means.
 read_record() {
   record_file=$RECORD_DIR/keeper.json
   [ -f "$record_file" ] || die "$EXIT_RECORD" "$record_file missing; run address.sh first"
   record_fields=$(jq -r '
-    if type == "object" then (.version // ""), (.address // ""), (.pemSha256 // ""), "end"
+    def field: (. // "") | if type != "string" or test("\\p{Cc}") then error("bad field") else . end;
+    if type == "object" then (.version | field), (.address | field), (.pemSha256 | field), "end"
     else error("not a JSON object") end' "$record_file" 2>/dev/null) ||
-    die "$EXIT_RECORD" "$record_file is not a JSON object"
+    die "$EXIT_RECORD" "$record_file is not a JSON object with plain string fields"
+  [ -n "$record_fields" ] || die "$EXIT_RECORD" "$record_file is empty"
   {
     read -r recorded_version
     read -r recorded_address
@@ -213,6 +221,26 @@ read_record() {
   } <<EOT
 $record_fields
 EOT
+}
+
+# --- live key lookups ---------------------------------------------------------
+# find_key: prints the cryptoKey resource as JSON, or nothing when the key does
+# not exist. A filtered list makes absence a structured empty result instead of
+# an error message to parse; any other failure is gcloud's, exit 1.
+find_key() {
+  find_key_list=$(gcloud kms keys list --project="$KEY_PROJECT" --location="$LOCATION" --keyring="$KEY_RING" \
+    --filter="name=$KEY_NAME" --format=json)
+  printf '%s\n' "$find_key_list" | jq -c --arg name "$KEY_NAME" '.[] | select(.name == $name)'
+}
+
+# describe_version_1: sets version_state, version_algorithm and
+# version_protection from the live version 1, and dies with
+# EXIT_KEY_ATTRIBUTES if its algorithm or protection level are not the
+# expected ones.
+describe_version_1() {
+  version_json=$(gcloud kms keys versions describe "$KEY_VERSION_NAME" --format=json)
+  read_version_attributes "$version_json" ||
+    die "$EXIT_KEY_ATTRIBUTES" "version 1 is algorithm=$version_algorithm protectionLevel=$version_protection"
 }
 
 # strip_solidity_comments: stdin -> stdout with // and /* */ comments and
@@ -249,14 +277,23 @@ strip_solidity_comments() {
 normalize_policy() {
   jq -S '{
     bindings: ((.bindings // [])
-      | map({role, members: (.members | sort)} + (if .condition then {condition} else {} end))
+      | map({role, members: ((.members // []) | sort)} + (if .condition then {condition} else {} end))
       | sort_by(.role)),
     auditConfigs: ((.auditConfigs // [])
-      | map({service, auditLogConfigs: (.auditLogConfigs
+      | map({service, auditLogConfigs: ((.auditLogConfigs // [])
           | map({logType} + (if .exemptedMembers then {exemptedMembers: (.exemptedMembers | sort)} else {} end))
           | sort_by(.logType))})
       | sort_by(.service))
   }'
+}
+
+# policy_differs LIVE_JSON DESIRED_JSON: returns 0 when the two policies differ
+# in bindings or audit configs (etag and version ignored). Leaves the canonical
+# forms in live_norm and desired_norm for reporting.
+policy_differs() {
+  live_norm=$(printf '%s\n' "$1" | normalize_policy)
+  desired_norm=$(printf '%s\n' "$2" | normalize_policy)
+  [ "$live_norm" != "$desired_norm" ]
 }
 
 # get_iam RESOURCE gcloud-subcommand...: prints the live policy as JSON.
@@ -275,9 +312,7 @@ write_iam_if_changed() {
   iam_live=$2
   iam_desired=$3
   shift 3
-  iam_live_norm=$(printf '%s\n' "$iam_live" | normalize_policy)
-  iam_desired_norm=$(printf '%s\n' "$iam_desired" | normalize_policy)
-  if [ "$iam_live_norm" = "$iam_desired_norm" ]; then
+  if ! policy_differs "$iam_live" "$iam_desired"; then
     log "iam: $iam_resource already has the expected policy"
     return 0
   fi
