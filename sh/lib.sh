@@ -55,7 +55,9 @@ die() {
 # A temp dir removed on exit. Scripts call this once, then use $TMP.
 make_tmp() {
   TMP=$(mktemp -d)
-  trap 'rm -rf "$TMP"' EXIT INT TERM
+  trap 'rm -rf "$TMP"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
 }
 
 # --- dependencies -------------------------------------------------------------
@@ -85,7 +87,8 @@ require_tools() {
   require_tool openssl ""
   require_tool jq ""
   require_tool cast " (Foundry: https://getfoundry.sh)"
-  gcloud_version=$(gcloud version --format=json | jq -r '."Google Cloud SDK"')
+  gcloud_version_json=$(gcloud version --format=json)
+  gcloud_version=$(printf '%s\n' "$gcloud_version_json" | jq -r '."Google Cloud SDK"')
   version_ge "$gcloud_version" "$MIN_GCLOUD_VERSION" ||
     die "$EXIT_DEPENDENCY" "gcloud $gcloud_version is older than the pinned minimum $MIN_GCLOUD_VERSION"
 }
@@ -94,6 +97,9 @@ require_tools() {
 # Reads config.env if present. Variables already in the environment win, which
 # is how CI supplies them without a config file.
 load_config() {
+  if [ -n "${HYDREX_CONFIG:-}" ] && [ ! -f "$CONFIG_FILE" ]; then
+    die "$EXIT_CONFIG" "HYDREX_CONFIG points at $CONFIG_FILE, which does not exist"
+  fi
   if [ -f "$CONFIG_FILE" ]; then
     env_KEY_PROJECT=${KEY_PROJECT:-} env_KEEPER_PROJECT=${KEEPER_PROJECT:-}
     env_LOCATION=${LOCATION:-} env_KEY_RING=${KEY_RING:-} env_KEY=${KEY:-}
@@ -141,9 +147,25 @@ load_config() {
 # the key may have. When KEEPER_SA is empty, the keeper bindings are dropped, so
 # before grant.sh the policy is the admin group alone. Prints JSON.
 render_key_policy() {
-  sed -e "s|\${ADMIN_GROUP}|$ADMIN_GROUP|g" -e "s|\${KEEPER_SA}|$KEEPER_SA|g" \
-    "$POLICY_DIR/key.iam.json.tmpl" |
-    jq '.bindings |= map(.members |= map(select(endswith(":") | not)) | select(.members | length > 0))'
+  jq --arg admin "$ADMIN_GROUP" --arg keeper "$KEEPER_SA" '
+    walk(if type == "string"
+         then (split("${ADMIN_GROUP}") | join($admin)) | (split("${KEEPER_SA}") | join($keeper))
+         else . end)
+    | .bindings |= map(.members |= map(select(endswith(":") | not)) | select(.members | length > 0))
+  ' "$POLICY_DIR/key.iam.json.tmpl"
+}
+
+# read_key_attributes KEY_JSON: sets purpose, algorithm, protection and window
+# from a cryptoKey resource, and returns 0 if purpose, algorithm and protection
+# level are the expected ones.
+read_key_attributes() {
+  purpose=$(printf '%s\n' "$1" | jq -r '.purpose')
+  algorithm=$(printf '%s\n' "$1" | jq -r '.versionTemplate.algorithm')
+  protection=$(printf '%s\n' "$1" | jq -r '.versionTemplate.protectionLevel')
+  window=$(printf '%s\n' "$1" | jq -r '.destroyScheduledDuration // empty')
+  [ "$purpose" = "$KEY_PURPOSE_API" ] &&
+    [ "$algorithm" = "$KEY_ALGORITHM_API" ] &&
+    [ "$protection" = "$KEY_PROTECTION_API" ]
 }
 
 # Canonical form of an IAM policy for comparison: bindings and audit configs,
@@ -198,7 +220,10 @@ set_iam_authoritative() {
   set_iam_resource=$1
   set_iam_desired=$2
   shift 2
-  write_iam_if_changed "$set_iam_resource" "$(get_iam "$set_iam_resource" "$@")" "$set_iam_desired" "$@"
+  # Assigned on its own line so a failed read aborts under set -e instead of
+  # becoming an empty LIVE (and an empty etag) inside an argument.
+  set_iam_live=$(get_iam "$set_iam_resource" "$@")
+  write_iam_if_changed "$set_iam_resource" "$set_iam_live" "$set_iam_desired" "$@"
 }
 
 # --- address derivation -------------------------------------------------------

@@ -13,7 +13,9 @@ update=no
 [ "${1:-}" = "--update" ] && update=yes
 
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT INT TERM
+trap 'rm -rf "$tmp"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 mkdir "$tmp/bin"
 ln -s "$root/test/fake-gcloud" "$tmp/bin/gcloud"
 PATH=$tmp/bin:$PATH
@@ -94,6 +96,20 @@ elif ! diff -u "$fixtures/record/keeper.json" "$tmp/record/keeper.json" || ! dif
   printf 'FAIL    address: record differs from test/fixtures/record\n'
   failures=$((failures + 1))
 fi
+# Re-running against the same key is fine; against a different key it refuses
+# unless --force is given.
+run_case address-same-key existing admin-only "$tmp/record" address.sh
+compare address-same-key "$tmp/address-same-key.log"
+mkdir "$tmp/record-other"
+cp "$fixtures/record/keeper.json" "$fixtures/record/keeper.pem" "$tmp/record-other/"
+run_case address-other-key other-key admin-only "$tmp/record-other" address.sh
+compare address-other-key "$tmp/address-other-key.log"
+run_case address-other-key-force other-key admin-only "$tmp/record-other" address.sh --force
+printf -- '--- record/keeper.json ---\n' >>"$tmp/address-other-key-force.log"
+cat "$tmp/record-other/keeper.json" >>"$tmp/address-other-key-force.log"
+compare address-other-key-force "$tmp/address-other-key-force.log"
+run_case address-pending fresh admin-only "$tmp/record" address.sh
+compare address-pending "$tmp/address-pending.log"
 
 # check.sh: each drift has its own exit code.
 run_case check-ok existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-ok"
@@ -110,12 +126,18 @@ run_case check-other-key other-key with-keeper "$fixtures/record" check.sh
 compare check-other-key "$tmp/check-other-key.log"
 run_case check-extra-binding extra-binding with-keeper "$fixtures/record" check.sh
 compare check-extra-binding "$tmp/check-extra-binding.log"
-run_case check-before-grant existing admin-only "$fixtures/record" check.sh
+run_case check-before-grant admin-only admin-only "$fixtures/record" check.sh
 compare check-before-grant "$tmp/check-before-grant.log"
+run_case check-config-behind-grant existing admin-only "$fixtures/record" check.sh
+compare check-config-behind-grant "$tmp/check-config-behind-grant.log"
+run_case check-missing-config existing missing "$fixtures/record" check.sh
+compare check-missing-config "$tmp/check-missing-config.log"
 run_case check-no-audit no-audit with-keeper "$fixtures/record" check.sh
 compare check-no-audit "$tmp/check-no-audit.log"
 run_case check-relay-mismatch existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-bad"
 compare check-relay-mismatch "$tmp/check-relay-mismatch.log"
+run_case check-relay-decoy existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-decoy"
+compare check-relay-decoy "$tmp/check-relay-decoy.log"
 
 if [ "$failures" -ne 0 ]; then
   printf '%s golden case(s) failed\n' "$failures"
