@@ -46,11 +46,7 @@ fi
 # Key attributes
 key=$(gcloud kms keys describe "$KEY_NAME" --format=json) ||
   die "$EXIT_KEY_ATTRIBUTES" "cannot describe $KEY_NAME"
-purpose=$(printf '%s\n' "$key" | jq -r '.purpose')
-algorithm=$(printf '%s\n' "$key" | jq -r '.versionTemplate.algorithm')
-protection=$(printf '%s\n' "$key" | jq -r '.versionTemplate.protectionLevel')
-window=$(printf '%s\n' "$key" | jq -r '.destroyScheduledDuration // empty')
-if [ "$purpose" = "$KEY_PURPOSE_API" ] && [ "$algorithm" = "$KEY_ALGORITHM_API" ] && [ "$protection" = "$KEY_PROTECTION_API" ]; then
+if read_key_attributes "$key"; then
   ok "key is $purpose $algorithm $protection"
 else
   fail "$EXIT_KEY_ATTRIBUTES" "key is purpose=$purpose algorithm=$algorithm protectionLevel=$protection"
@@ -70,26 +66,42 @@ if [ "$count" -eq 1 ]; then
 else
   fail "$EXIT_VERSION_COUNT" "$count key versions exist; the address is the property of version 1 alone:$(printf '%s\n' "$versions" | jq -r '.[] | " \(.name | split("/") | last)=\(.state)"' | tr -d '\n')"
 fi
-state=$(printf '%s\n' "$versions" | jq -r --arg name "$KEY_VERSION_NAME" '.[] | select(.name == $name) | .state')
+version1=$(printf '%s\n' "$versions" | jq -c --arg name "$KEY_VERSION_NAME" '.[] | select(.name == $name)')
+state=$(printf '%s\n' "$version1" | jq -r '.state // empty')
 if [ "$state" = "ENABLED" ]; then
   ok "version 1 is ENABLED"
 else
   fail "$EXIT_VERSION_STATE" "version 1 is ${state:-missing}"
 fi
-
-# Address
-pem=$TMP/live.pem
-gcloud kms keys versions get-public-key "$KEY_VERSION_NAME" --output-file="$pem"
-live_address=$(derive_address "$pem")
-if [ "$live_address" = "$recorded_address" ]; then
-  ok "live public key derives to $recorded_address"
+# The key's versionTemplate is mutable; the version's own algorithm and
+# protection level are what the material actually has.
+version_algorithm=$(printf '%s\n' "$version1" | jq -r '.algorithm // empty')
+version_protection=$(printf '%s\n' "$version1" | jq -r '.protectionLevel // empty')
+if [ "$version_algorithm" = "$KEY_ALGORITHM_API" ] && [ "$version_protection" = "$KEY_PROTECTION_API" ]; then
+  ok "version 1 is $version_algorithm $version_protection"
 else
-  fail "$EXIT_ADDRESS" "live public key derives to $live_address, record says $recorded_address"
+  fail "$EXIT_KEY_ATTRIBUTES" "version 1 is algorithm=${version_algorithm:-?} protectionLevel=${version_protection:-?}"
 fi
-[ "$(sha256_file "$pem")" = "$recorded_sha" ] || fail "$EXIT_ADDRESS" "live PEM differs from record/keeper.pem"
 
-# Key IAM equals the rendered template exactly.
-live_policy=$(gcloud kms keys get-iam-policy "$KEY_NAME" --format=json | normalize_policy)
+# Address. Guarded: a version that is not ENABLED may have no retrievable
+# public key, and the remaining checks must still run.
+pem=$TMP/live.pem
+if gcloud kms keys versions get-public-key "$KEY_VERSION_NAME" --output-file="$pem"; then
+  live_address=$(derive_address "$pem")
+  if [ "$live_address" = "$recorded_address" ]; then
+    ok "live public key derives to $recorded_address"
+  else
+    fail "$EXIT_ADDRESS" "live public key derives to $live_address, record says $recorded_address"
+  fi
+  [ "$(sha256_file "$pem")" = "$recorded_sha" ] || fail "$EXIT_ADDRESS" "live PEM differs from record/keeper.pem"
+else
+  fail "$EXIT_ADDRESS" "could not fetch the public key of $KEY_VERSION_NAME"
+fi
+
+# Key IAM equals the rendered template exactly. Reads are assigned before they
+# are normalized so a failed gcloud call aborts instead of reading as drift.
+live_policy_raw=$(get_iam "$KEY_NAME" kms keys)
+live_policy=$(printf '%s\n' "$live_policy_raw" | normalize_policy)
 expected_policy=$(render_key_policy | normalize_policy)
 if [ "$live_policy" = "$expected_policy" ]; then
   ok "key IAM policy matches policy/key.iam.json.tmpl"
@@ -101,7 +113,8 @@ else
 fi
 
 # Project audit config still holds the KMS entry.
-live_audit=$(gcloud projects get-iam-policy "$KEY_PROJECT" --format=json |
+project_policy_raw=$(get_iam "$KEY_PROJECT" projects)
+live_audit=$(printf '%s\n' "$project_policy_raw" |
   jq -c --slurpfile audit "$POLICY_DIR/audit.json" \
     '{auditConfigs: ((.auditConfigs // []) | map(select(.service == $audit[0].service)))}' | normalize_policy)
 expected_audit=$(jq -c '{auditConfigs: [.]}' "$POLICY_DIR/audit.json" | normalize_policy)
@@ -117,7 +130,8 @@ if [ -n "$relay_dir" ]; then
   if [ ! -f "$deploy" ]; then
     fail "$EXIT_RELAY" "$deploy not found"
   else
-    relay_keeper=$(grep -E 'KEEPER' "$deploy" | grep -Eo '0x[0-9a-fA-F]{40}' | head -n 1 || true)
+    # The KEEPER assignment itself, not a KEEPER_* identifier or a comment.
+    relay_keeper=$(grep -E '(^|[^A-Za-z0-9_])KEEPER[[:space:]]*=' "$deploy" | grep -Eo '0x[0-9a-fA-F]{40}' | head -n 1 || true)
     if [ -z "$relay_keeper" ]; then
       fail "$EXIT_RELAY" "no KEEPER address found in $deploy"
     elif [ "$(printf '%s' "$relay_keeper" | tr 'A-F' 'a-f')" = "$(printf '%s' "$recorded_address" | tr 'A-F' 'a-f')" ]; then

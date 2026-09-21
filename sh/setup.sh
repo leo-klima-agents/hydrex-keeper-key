@@ -55,11 +55,7 @@ if [ -z "$key" ]; then
     --protection-level="$KEY_PROTECTION" \
     --destroy-scheduled-duration="$DESTROY_WINDOW"
 else
-  purpose=$(printf '%s\n' "$key" | jq -r '.purpose')
-  algorithm=$(printf '%s\n' "$key" | jq -r '.versionTemplate.algorithm')
-  protection=$(printf '%s\n' "$key" | jq -r '.versionTemplate.protectionLevel')
-  window=$(printf '%s\n' "$key" | jq -r '.destroyScheduledDuration // empty')
-  if [ "$purpose" != "$KEY_PURPOSE_API" ] || [ "$algorithm" != "$KEY_ALGORITHM_API" ] || [ "$protection" != "$KEY_PROTECTION_API" ]; then
+  if ! read_key_attributes "$key"; then
     die "$EXIT_KEY_ATTRIBUTES" "key $KEY_NAME exists with purpose=$purpose algorithm=$algorithm protectionLevel=$protection; expected $KEY_PURPOSE_API/$KEY_ALGORITHM_API/$KEY_PROTECTION_API. Not adopting it. Pick another KEY name or resolve by hand."
   fi
   log "key exists with the expected purpose, algorithm and protection level"
@@ -72,7 +68,8 @@ fi
 # 4. Key IAM: the complete policy, admin group plus keeper (if configured).
 log "== 4/7 key IAM"
 [ -n "$KEEPER_SA" ] || log "KEEPER_SA is empty: the policy is the admin group alone until grant.sh"
-set_iam_authoritative "$KEY_NAME" "$(render_key_policy)" kms keys
+key_policy=$(render_key_policy)
+set_iam_authoritative "$KEY_NAME" "$key_policy" kms keys
 
 # 5. Audit config on the project. The project policy is not this repo's to own,
 #    so bindings are kept as they are; the cloudkms.googleapis.com audit entry

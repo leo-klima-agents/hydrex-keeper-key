@@ -23,5 +23,6 @@ gcloud iam service-accounts describe "$KEEPER_SA" --project="$KEEPER_PROJECT" --
   die 1 "service account $KEEPER_SA not found in $KEEPER_PROJECT"
 
 log "granting roles/cloudkms.signer and roles/cloudkms.publicKeyViewer on $KEY_NAME to $KEEPER_SA"
-set_iam_authoritative "$KEY_NAME" "$(render_key_policy)" kms keys
+key_policy=$(render_key_policy)
+set_iam_authoritative "$KEY_NAME" "$key_policy" kms keys
 log "done"
