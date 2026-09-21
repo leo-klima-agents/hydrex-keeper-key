@@ -75,7 +75,7 @@ Idempotent. In order:
 4. Renders `policy/key.iam.json.tmpl` and writes it to the key with `set-iam-policy` using the live etag. Before `grant.sh` the policy is the admin group as `roles/cloudkms.admin` and nothing else. Once `KEEPER_SA` is in config, the keeper bindings are included, so running `setup.sh` after `grant.sh` never removes the grant.
 5. Merges `policy/audit.json` into the project IAM policy: the `cloudkms.googleapis.com` audit entry is replaced in full (ADMIN_READ, DATA_READ, DATA_WRITE); the project's bindings are left alone, since the project policy is not this repo's to own.
 6. Enforces `iam.disableServiceAccountKeyCreation` on the project, if permitted. It reads the effective policy first and writes only when the read succeeded and says not enforced. If the read or the write fails it prints gcloud's message as a warning and continues; ask an org admin to set it or inherit it from the folder.
-7. Prints the key version resource name and its state. HSM generation takes a moment; version 1 may be `PENDING_GENERATION` for a few seconds.
+7. Prints the key version resource name and its state. HSM generation takes a moment; version 1 may be `PENDING_GENERATION` for a few seconds. If version 1's own algorithm or protection level are not secp256k1 and HSM (possible when the key's template was edited after the version was cut) it stops with exit code 10.
 
 Confirm in the console: one key ring, one key, one version, HSM, secp256k1, destroy window 120 days, and under the key's Permissions tab exactly the admin group. Under IAM > Audit Logs, Cloud KMS has all three log types on.
 
@@ -145,9 +145,9 @@ sh/check.sh                       # against the live key project
 sh/check.sh ../hydrex-conduit-executor   # also compares KEEPER in script/Deploy.s.sol
 ```
 
-It re-derives the address from the live key and compares it with `record/`, asserts version 1 is `ENABLED` and is the only version, that the key's purpose, algorithm, protection level and destroy window are unchanged, that version 1's own algorithm and protection level are secp256k1 and HSM (the key's template is mutable; the version's material is not), that the key's IAM policy equals the rendered template exactly, and that the project audit config still contains the KMS entry. Every check runs; every failure is printed; the exit code is the first failure's. A failed `gcloud` call is exit 1 with gcloud's message, never reported as drift; the one exception is a `NOT_FOUND` on the key itself, which is exit 10. When version 1 is not an `ENABLED` secp256k1 HSM version the address check is skipped, since the derivation does not apply, and exits 10, 12 or 13 already name the problem.
+It re-derives the address from the live key and compares it with `record/`, asserts version 1 is `ENABLED` and is the only version, that the key's purpose, algorithm, protection level and destroy window are unchanged, that version 1's own algorithm and protection level are secp256k1 and HSM (the key's template is mutable; the version's material is not), that the key's IAM policy equals the rendered template exactly, and that the project audit config still contains the KMS entry. Every check runs; every failure is printed; the exit code is the first failure's. A failed `gcloud` call is exit 1 with gcloud's message, never reported as drift. Key existence is a filtered `list`, so a key that is gone is a structured empty result and exit 10, not an error message to parse; a misspelled key ring or project is gcloud's error, exit 1. When version 1 is not an `ENABLED` secp256k1 HSM version the address check is skipped, since the derivation does not apply, and exits 10, 12 or 13 already name the problem.
 
-The relay comparison looks for the one `KEEPER = 0x…` assignment in `script/Deploy.s.sol` (also `address(0x…)` or `payable(0x…)`) after a single pass that removes `//` and `/* */` comments and string literals and joins lines. A commented-out old value, a URL inside a comment or a string, a `KEEPER_*` identifier, a `KEEPER ==` comparison or a formatter-wrapped assignment do not confuse it. Two different assignments are exit 17 as well; part one must keep exactly one.
+The relay comparison looks for the one `KEEPER = 0x…` assignment in `script/Deploy.s.sol` (also wrapped in any number of `address(…)` or `payable(…)` casts) after a single pass that removes `//` and `/* */` comments and string literals and joins lines. A commented-out old value, a URL inside a comment or a string, a `KEEPER_*` identifier, a `KEEPER ==` comparison or a formatter-wrapped assignment do not confuse it. Two different assignments are exit 17 as well; part one must keep exactly one.
 
 `check.sh` renders the expected policy from your config, so once `grant.sh` has run, `KEEPER_SA` must be set wherever `check.sh` runs (config.env locally, the repository variable in CI), or the live grant reads as drift with exit 15.
 
@@ -155,12 +155,12 @@ The relay comparison looks for the one `KEEPER = 0x…` assignment in `script/De
 |---|---|
 | 0 | all checks passed |
 | 1 | a gcloud call failed |
-| 2 | config missing, incomplete or inconsistent; bad usage |
+| 2 | config missing, incomplete or inconsistent; extra or unknown arguments |
 | 3 | a required tool is missing or gcloud is older than the pinned minimum |
-| 10 | key not found (`NOT_FOUND` from KMS), or purpose, algorithm or protection level differ, on the key or on version 1 |
+| 10 | key not found, or purpose, algorithm or protection level differ, on the key or on version 1 |
 | 11 | destroy window is not 120 days (immutable; `setup.sh` will not adopt such a key) |
 | 12 | version 1 is not `ENABLED` |
-| 13 | a version other than 1 exists, or the only version is not version 1 |
+| 13 | version 1 is missing, or is not the only version |
 | 14 | live public key does not derive to the recorded address |
 | 15 | key IAM policy differs from the rendered template |
 | 16 | project audit config lacks the KMS entry |

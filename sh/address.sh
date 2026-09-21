@@ -25,9 +25,9 @@ require_tools openssl cast
 load_config
 make_tmp
 
-version=$(gcloud kms keys versions describe "$KEY_VERSION_NAME" --format=json)
-read_version_attributes "$version" ||
-  die "$EXIT_KEY_ATTRIBUTES" "version 1 is algorithm=$version_algorithm protectionLevel=$version_protection"
+key=$(find_key)
+[ -n "$key" ] || die "$EXIT_KEY_ATTRIBUTES" "key $KEY_NAME not found; run setup.sh first"
+describe_version_1
 [ "$version_state" = "ENABLED" ] || die "$EXIT_VERSION_STATE" "version 1 is $version_state, not ENABLED"
 
 pem=$TMP/keeper.pem
