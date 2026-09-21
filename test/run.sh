@@ -29,6 +29,14 @@ export FAKE_KEEPER_SA=hydrex-keeper@hydrex-keeper-rt-test.iam.gserviceaccount.co
 failures=0
 compare() { # compare NAME ACTUAL_FILE
   golden=$root/test/golden/$1.txt
+  # Exit 126 or 127 is a shell "cannot execute" or "not found": a broken
+  # script, never an intended outcome. Refuse to enshrine it.
+  if grep -Eq '^exit=12[67]$' "$2"; then
+    printf 'FAIL    %s: exit 126/127, the script is broken\n' "$1"
+    cat "$tmp/$1.out"
+    failures=$((failures + 1))
+    return 0
+  fi
   if [ "$update" = yes ]; then
     cp "$2" "$golden"
     printf 'updated %s\n' "$1"
@@ -130,6 +138,29 @@ run_case address-malformed-record existing admin-only "$tmp/record-malformed" ad
 compare address-malformed-record "$tmp/address-malformed-record.log"
 run_case address-bad-args existing admin-only "$tmp/record" address.sh --force extra
 compare address-bad-args "$tmp/address-bad-args.log"
+# keeper.json intact but keeper.pem gone: regenerate, do not trust the hash.
+mkdir "$tmp/record-no-pem"
+cp "$fixtures/record/keeper.json" "$tmp/record-no-pem/"
+run_case address-missing-pem existing admin-only "$tmp/record-no-pem" address.sh
+printf -- '--- record/keeper.pem ---\n' >>"$tmp/address-missing-pem.log"
+cat "$tmp/record-no-pem/keeper.pem" >>"$tmp/address-missing-pem.log"
+compare address-missing-pem "$tmp/address-missing-pem.log"
+# A record without pemSha256 (older format) is refreshed by address.sh and
+# rejected by check.sh with the record code, not a bare read failure.
+mkdir "$tmp/record-no-sha"
+cp "$fixtures/record/keeper.pem" "$tmp/record-no-sha/"
+jq 'del(.pemSha256)' "$fixtures/record/keeper.json" >"$tmp/record-no-sha/keeper.json"
+run_case check-record-no-sha existing with-keeper "$tmp/record-no-sha" check.sh
+compare check-record-no-sha "$tmp/check-record-no-sha.log"
+run_case address-record-no-sha existing admin-only "$tmp/record-no-sha" address.sh
+printf -- '--- record/keeper.json ---\n' >>"$tmp/address-record-no-sha.log"
+cat "$tmp/record-no-sha/keeper.json" >>"$tmp/address-record-no-sha.log"
+compare address-record-no-sha "$tmp/address-record-no-sha.log"
+mkdir "$tmp/record-array"
+printf '[1,2]\n' >"$tmp/record-array/keeper.json"
+cp "$fixtures/record/keeper.pem" "$tmp/record-array/"
+run_case check-record-not-object existing with-keeper "$tmp/record-array" check.sh
+compare check-record-not-object "$tmp/check-record-not-object.log"
 run_case address-pending fresh admin-only "$tmp/record" address.sh
 compare address-pending "$tmp/address-pending.log"
 
@@ -142,6 +173,12 @@ run_case check-malformed-record existing with-keeper "$tmp/record-malformed" che
 compare check-malformed-record "$tmp/check-malformed-record.log"
 run_case check-foreign-key foreign-key with-keeper "$fixtures/record" check.sh
 compare check-foreign-key "$tmp/check-foreign-key.log"
+run_case check-foreign-version foreign-version with-keeper "$fixtures/record" check.sh
+compare check-foreign-version "$tmp/check-foreign-version.log"
+run_case check-no-key no-key with-keeper "$fixtures/record" check.sh
+compare check-no-key "$tmp/check-no-key.log"
+run_case check-version-two-only version-two-only with-keeper "$fixtures/record" check.sh
+compare check-version-two-only "$tmp/check-version-two-only.log"
 run_case check-window-and-disabled window-and-disabled with-keeper "$fixtures/record" check.sh
 compare check-window-and-disabled "$tmp/check-window-and-disabled.log"
 run_case check-two-versions two-versions with-keeper "$fixtures/record" check.sh

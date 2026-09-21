@@ -12,7 +12,7 @@ script_dir=$(dirname -- "$0")
 # shellcheck source=sh/lib.sh
 . "$script_dir/lib.sh"
 
-require_tools
+require_tools openssl cast
 load_config
 make_tmp
 
@@ -39,8 +39,15 @@ fi
   die "$EXIT_RECORD" "record/keeper.pem does not match pemSha256 in keeper.json"
 
 # Key attributes
-# A failed describe is a gcloud failure (exit 1 under set -e), not drift.
-key=$(gcloud kms keys describe "$KEY_NAME" --format=json)
+# A key that is gone is exit 10; any other describe failure is a gcloud
+# failure, exit 1, with gcloud's message.
+if ! key=$(gcloud kms keys describe "$KEY_NAME" --format=json 2>"$TMP/describe.err"); then
+  cat "$TMP/describe.err" >&2
+  if grep -q NOT_FOUND "$TMP/describe.err"; then
+    die "$EXIT_KEY_ATTRIBUTES" "key $KEY_NAME not found"
+  fi
+  die 1 "could not describe $KEY_NAME"
+fi
 if read_key_attributes "$key"; then
   ok "key is $purpose $algorithm $protection"
 else
@@ -52,45 +59,57 @@ else
   fail "$EXIT_DESTROY_WINDOW" "destroy window is ${window:-unset}, expected $DESTROY_WINDOW_API"
 fi
 
-# Versions: exactly one, and it is version 1, ENABLED.
+# Versions: exactly one, and it is version 1, ENABLED, with the expected
+# algorithm and protection level of its own.
 versions=$(gcloud kms keys versions list --project="$KEY_PROJECT" --location="$LOCATION" \
   --keyring="$KEY_RING" --key="$KEY" --format=json)
 count=$(printf '%s\n' "$versions" | jq 'length')
-if [ "$count" -eq 1 ]; then
-  ok "one key version"
-else
-  fail "$EXIT_VERSION_COUNT" "$count key versions exist; the address is the property of version 1 alone:$(printf '%s\n' "$versions" | jq -r '.[] | " \(.name | split("/") | last)=\(.state)"' | tr -d '\n')"
-fi
+listed=$(printf '%s\n' "$versions" | jq -r '.[] | " \(.name | split("/") | last)=\(.state)"' | tr -d '\n')
 version1=$(printf '%s\n' "$versions" | jq -c --arg name "$KEY_VERSION_NAME" '.[] | select(.name == $name)')
-if read_version_attributes "$version1"; then
-  ok "version 1 is $version_algorithm $version_protection"
+if [ "$count" -eq 1 ] && [ -n "$version1" ]; then
+  ok "one key version, and it is version 1"
+elif [ "$count" -eq 1 ]; then
+  fail "$EXIT_VERSION_COUNT" "the only key version is not version 1:$listed"
 else
-  fail "$EXIT_KEY_ATTRIBUTES" "version 1 is algorithm=${version_algorithm:-?} protectionLevel=${version_protection:-?}"
+  fail "$EXIT_VERSION_COUNT" "$count key versions exist; the address is the property of version 1 alone:$listed"
 fi
-if [ "$version_state" = "ENABLED" ]; then
-  ok "version 1 is ENABLED"
+version_ok=no
+if [ -z "$version1" ]; then
+  fail "$EXIT_VERSION_STATE" "version 1 is missing"
+  version_state=missing
 else
-  fail "$EXIT_VERSION_STATE" "version 1 is ${version_state:-missing}"
+  if read_version_attributes "$version1"; then
+    ok "version 1 is $version_algorithm $version_protection"
+    version_ok=yes
+  else
+    fail "$EXIT_KEY_ATTRIBUTES" "version 1 is algorithm=${version_algorithm:-?} protectionLevel=${version_protection:-?}"
+  fi
+  if [ "$version_state" = "ENABLED" ]; then
+    ok "version 1 is ENABLED"
+  else
+    fail "$EXIT_VERSION_STATE" "version 1 is ${version_state:-unknown}"
+  fi
 fi
 
-# Address. Only an ENABLED version has a retrievable public key; for any other
-# state exit 12 above already says what is wrong and the remaining checks still
-# run. For an ENABLED version a failed fetch is a gcloud failure, exit 1.
-if [ "$version_state" = "ENABLED" ]; then
+# Address. Only an ENABLED secp256k1 version has a public key this derivation
+# applies to; for anything else the failures above already say what is wrong
+# and the remaining checks still run. For such a version a failed fetch is a
+# gcloud failure, exit 1.
+if [ "$version_state" = "ENABLED" ] && [ "$version_ok" = yes ]; then
   pem=$TMP/live.pem
   gcloud kms keys versions get-public-key "$KEY_VERSION_NAME" --output-file="$pem"
   live_address=$(derive_address "$pem")
   if [ "$live_address" = "$recorded_address" ]; then
     ok "live public key derives to $recorded_address"
+    # Same key, different PEM bytes can only be a formatting change in
+    # gcloud's output. Worth a note, not a failure; address.sh refreshes it.
+    [ "$(sha256_file "$pem")" = "$recorded_sha" ] ||
+      log "note: live PEM bytes differ from record/keeper.pem while the address matches; run address.sh to refresh the record"
   else
     fail "$EXIT_ADDRESS" "live public key derives to $live_address, record says $recorded_address"
   fi
-  # Same key, different PEM bytes can only be a formatting change in gcloud's
-  # output. Worth a note, not a failure; address.sh refreshes the record.
-  [ "$(sha256_file "$pem")" = "$recorded_sha" ] ||
-    log "note: live PEM bytes differ from record/keeper.pem while the address matches; run address.sh to refresh the record"
 else
-  log "skipping address check: version 1 is not ENABLED"
+  log "skipping address check: version 1 is not an ENABLED $KEY_ALGORITHM_API $KEY_PROTECTION_API version"
 fi
 
 # Key IAM equals the rendered template exactly. Reads are assigned before they
@@ -126,12 +145,13 @@ if [ -n "$relay_dir" ]; then
   if [ ! -f "$deploy" ]; then
     fail "$EXIT_RELAY" "$deploy not found"
   else
-    # The KEEPER assignment itself: comments stripped, lines joined so a
-    # wrapped assignment still matches, `KEEPER ==` excluded by requiring the
-    # literal to follow a single `=`, and exactly one distinct address.
-    relay_addresses=$(sed 's|//.*$||' "$deploy" | tr '\n' ' ' |
-      sed 's|/\*[^*]*\*\{1,\}\([^/*][^*]*\*\{1,\}\)*/||g' |
-      grep -Eo '(^|[^A-Za-z0-9_])KEEPER[[:space:]]*=[[:space:]]*0x[0-9a-fA-F]{40}' |
+    # The KEEPER assignment itself, in the source with comments and string
+    # literals removed and lines joined: not a commented-out old value, not a
+    # KEEPER_* identifier, not a `KEEPER ==` comparison, and wrapped
+    # assignments still match. The literal may be wrapped in address(...) or
+    # payable(...). Exactly one distinct address is required.
+    relay_addresses=$(strip_solidity_comments <"$deploy" |
+      grep -Eo '(^|[^A-Za-z0-9_])KEEPER[[:space:]]*=[[:space:]]*((address|payable)\([[:space:]]*)?0x[0-9a-fA-F]{40}' |
       grep -Eo '0x[0-9a-fA-F]{40}' | tr 'A-F' 'a-f' | sort -u || true)
     relay_count=$(printf '%s' "$relay_addresses" | grep -c . || true)
     relay_keeper=$(printf '%s' "$relay_addresses" | head -n 1)

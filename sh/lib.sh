@@ -12,7 +12,7 @@
 # 1 is left to `set -e` (a gcloud call or pipeline failed).
 EXIT_CONFIG=2          # config.env missing, incomplete or inconsistent; bad usage
 EXIT_DEPENDENCY=3      # a required tool is missing or gcloud is too old
-EXIT_KEY_ATTRIBUTES=10 # key missing, or purpose/algorithm/protection level differ
+EXIT_KEY_ATTRIBUTES=10 # key not found, or purpose/algorithm/protection level differ
 EXIT_DESTROY_WINDOW=11 # destroy window is not 120 days
 EXIT_VERSION_STATE=12  # version 1 is not ENABLED
 EXIT_VERSION_COUNT=13  # a version other than 1 exists
@@ -82,11 +82,18 @@ EOT
   [ "$have_3" -ge "$min_3" ]
 }
 
+# shellcheck disable=SC2120
+# require_tools [EXTRA...]: gcloud and jq always; address.sh and check.sh
+# also pass openssl and cast, which the IAM scripts never use.
 require_tools() {
   require_tool gcloud " (https://cloud.google.com/sdk/docs/install)"
-  require_tool openssl ""
   require_tool jq ""
-  require_tool cast " (Foundry: https://getfoundry.sh)"
+  for extra_tool in "$@"; do
+    case "$extra_tool" in
+      cast) require_tool cast " (Foundry: https://getfoundry.sh)" ;;
+      *) require_tool "$extra_tool" "" ;;
+    esac
+  done
   gcloud_version_json=$(gcloud version --format=json)
   gcloud_version=$(printf '%s\n' "$gcloud_version_json" | jq -r '."Google Cloud SDK"')
   version_ge "$gcloud_version" "$MIN_GCLOUD_VERSION" ||
@@ -147,13 +154,17 @@ render_key_policy() {
   ' "$POLICY_DIR/key.iam.json.tmpl"
 }
 
+# Field readers. Each runs one jq over the resource and reads the fields line
+# by line. jq emits a final "end" line so the last field may be empty without
+# read hitting EOF (which would return 1 and, at top level, trip set -e).
+
 # read_key_attributes KEY_JSON: sets purpose, algorithm, protection and window
 # from a cryptoKey resource, and returns 0 if purpose, algorithm and protection
-# level are the expected ones. One jq call; one field per line.
+# level are the expected ones.
 read_key_attributes() {
   key_fields=$(printf '%s\n' "$1" | jq -r '
     (.purpose // ""), (.versionTemplate.algorithm // ""),
-    (.versionTemplate.protectionLevel // ""), (.destroyScheduledDuration // "")')
+    (.versionTemplate.protectionLevel // ""), (.destroyScheduledDuration // ""), "end"')
   {
     read -r purpose
     read -r algorithm
@@ -173,7 +184,7 @@ EOT
 # mutable; these are what the material actually has.
 read_version_attributes() {
   version_fields=$(printf '%s\n' "$1" | jq -r '
-    (.state // ""), (.algorithm // ""), (.protectionLevel // "")')
+    (.state // ""), (.algorithm // ""), (.protectionLevel // ""), "end"')
   {
     read -r version_state
     read -r version_algorithm
@@ -186,13 +197,15 @@ EOT
 }
 
 # read_record: loads record/keeper.json into recorded_version, recorded_address
-# and recorded_sha, or dies with EXIT_RECORD when the file is missing or
-# malformed.
+# and recorded_sha, or dies with EXIT_RECORD when the file is missing or is not
+# a JSON object. Missing fields read as empty; callers decide what that means.
 read_record() {
   record_file=$RECORD_DIR/keeper.json
   [ -f "$record_file" ] || die "$EXIT_RECORD" "$record_file missing; run address.sh first"
-  jq -e . "$record_file" >/dev/null 2>&1 || die "$EXIT_RECORD" "$record_file is not valid JSON"
-  record_fields=$(jq -r '(.version // ""), (.address // ""), (.pemSha256 // "")' "$record_file")
+  record_fields=$(jq -r '
+    if type == "object" then (.version // ""), (.address // ""), (.pemSha256 // ""), "end"
+    else error("not a JSON object") end' "$record_file" 2>/dev/null) ||
+    die "$EXIT_RECORD" "$record_file is not a JSON object"
   {
     read -r recorded_version
     read -r recorded_address
@@ -200,6 +213,35 @@ read_record() {
   } <<EOT
 $record_fields
 EOT
+}
+
+# strip_solidity_comments: stdin -> stdout with // and /* */ comments and
+# string literals removed and lines joined with spaces, so an assignment can
+# be matched wherever a formatter wrapped it. One pass, one state machine.
+strip_solidity_comments() {
+  awk '
+    BEGIN { state = "code" }
+    {
+      line = $0 " "
+      n = length(line)
+      for (i = 1; i <= n; i++) {
+        c = substr(line, i, 1)
+        d = substr(line, i, 2)
+        if (state == "code") {
+          if (d == "//") { state = "line"; break }
+          else if (d == "/*") { state = "block"; i++ }
+          else if (c == "\"" || c == "\047") { quote = c; state = "string" }
+          else printf "%s", c
+        } else if (state == "block") {
+          if (d == "*/") { state = "code"; i++; printf " " }
+        } else if (state == "string") {
+          if (c == "\\") i++
+          else if (c == quote) state = "code"
+        }
+      }
+      if (state == "line") state = "code"
+    }
+    END { printf "\n" }'
 }
 
 # Canonical form of an IAM policy for comparison: bindings and audit configs,

@@ -21,7 +21,7 @@ case "${1:-}" in
   *) die "$EXIT_CONFIG" "usage: $0 [--force]" ;;
 esac
 
-require_tools
+require_tools openssl cast
 load_config
 make_tmp
 
@@ -40,7 +40,10 @@ if [ -f "$RECORD_DIR/keeper.json" ] && [ "$force" = no ]; then
   if [ "$recorded_version" != "$KEY_VERSION_NAME" ] || [ "$recorded_address" != "$address" ]; then
     die "$EXIT_RECORD" "$RECORD_DIR/keeper.json already records $recorded_address for $recorded_version; the live key derives to $address for $KEY_VERSION_NAME. A different key means a new module in part one. Re-run with --force only if that is intended."
   fi
-  if [ "$recorded_sha" = "$pem_sha" ]; then
+  # Judged on the files as they are on disk, so a deleted or edited keeper.pem
+  # is regenerated rather than trusted from the recorded hash.
+  if [ -f "$RECORD_DIR/keeper.pem" ] && [ "$recorded_sha" = "$pem_sha" ] &&
+    [ "$(sha256_file "$RECORD_DIR/keeper.pem")" = "$pem_sha" ]; then
     log "record already matches the live key; nothing to write"
     printf '%s\n' "$address"
     exit 0
