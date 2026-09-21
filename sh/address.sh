@@ -1,13 +1,6 @@
 #!/bin/sh
-# sh/address.sh [--force] - public key of version 1 -> Ethereum address -> record/.
-#
-# PEM from KMS, DER via openssl, the final 64 bytes are X||Y (tail -c, od),
-# keccak256 via cast, last 20 bytes, EIP-55 checksum via cast. Writes
-# record/keeper.pem and record/keeper.json and prints the address.
-#
-# Refuses to replace an existing record that names a different key or address:
-# the record is what check.sh and part one's KEEPER are pinned to. --force
-# overrides, for the case where a new key and a new module are intended.
+# address.sh [--force]: version 1 public key -> Ethereum address -> record/.
+# Refuses to overwrite a record for a different key or address unless --force.
 set -eu
 script_dir=$(dirname -- "$0")
 # shellcheck source=sh/lib.sh
@@ -26,9 +19,9 @@ load_config
 make_tmp
 
 key=$(find_key)
-[ -n "$key" ] || die "$EXIT_KEY_ATTRIBUTES" "key $KEY_NAME not found; run setup.sh first"
+[ -n "$key" ] || die "$EXIT_KEY_ATTRIBUTES" "$KEY_NAME not found; run setup.sh"
 describe_version_1
-[ "$version_state" = "ENABLED" ] || die "$EXIT_VERSION_STATE" "version 1 is $version_state, not ENABLED"
+[ "$version_state" = "ENABLED" ] || die "$EXIT_VERSION_STATE" "version 1 is $version_state"
 
 pem=$TMP/keeper.pem
 gcloud kms keys versions get-public-key "$KEY_VERSION_NAME" --output-file="$pem"
@@ -38,21 +31,18 @@ pem_sha=$(sha256_file "$pem")
 if [ -f "$RECORD_DIR/keeper.json" ] && [ "$force" = no ]; then
   read_record
   if [ "$recorded_version" != "$KEY_VERSION_NAME" ] || [ "$recorded_address" != "$address" ]; then
-    die "$EXIT_RECORD" "$RECORD_DIR/keeper.json already records $recorded_address for $recorded_version; the live key derives to $address for $KEY_VERSION_NAME. A different key means a new module in part one. Re-run with --force only if that is intended."
+    die "$EXIT_RECORD" "record has $recorded_address for $recorded_version; live key is $address for $KEY_VERSION_NAME. A new key means a new module; --force to overwrite"
   fi
-  # Judged on the files as they are on disk, so a deleted or edited keeper.pem
-  # is regenerated rather than trusted from the recorded hash.
   if [ -f "$RECORD_DIR/keeper.pem" ] && [ "$recorded_sha" = "$pem_sha" ] &&
     [ "$(sha256_file "$RECORD_DIR/keeper.pem")" = "$pem_sha" ]; then
-    log "record already matches the live key; nothing to write"
+    log "record matches; nothing written"
     printf '%s\n' "$address"
     exit 0
   fi
-  log "record names the same key and address; refreshing keeper.pem and pemSha256"
+  log "refreshing keeper.pem and pemSha256"
 fi
 
-# Both files are written in $TMP and moved into place, JSON last, so an
-# interrupt or a failed jq cannot leave a truncated record behind.
+# Written in $TMP and moved, JSON last, so an interrupt cannot truncate the record.
 mkdir -p "$RECORD_DIR"
 jq -n \
   --arg key "$KEY_NAME" \
@@ -67,5 +57,5 @@ cp "$pem" "$TMP/keeper.pem.new"
 mv "$TMP/keeper.pem.new" "$RECORD_DIR/keeper.pem"
 mv "$TMP/keeper.json" "$RECORD_DIR/keeper.json"
 
-log "wrote $RECORD_DIR/keeper.pem and $RECORD_DIR/keeper.json; commit both"
+log "wrote $RECORD_DIR/keeper.pem and keeper.json; commit both"
 printf '%s\n' "$address"
