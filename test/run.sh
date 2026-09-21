@@ -10,7 +10,12 @@ set -eu
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 test_sh=${TEST_SH:-dash}
 update=no
-[ "${1:-}" = "--update" ] && update=yes
+case "${1:-}" in
+  "") ;;
+  --update) update=yes ;;
+  *) printf 'usage: %s [--update]\n' "$0" >&2; exit 2 ;;
+esac
+[ $# -le 1 ] || { printf 'usage: %s [--update]\n' "$0" >&2; exit 2; }
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -208,8 +213,17 @@ run_case check-no-audit no-audit with-keeper "$fixtures/record" check.sh
 compare check-no-audit "$tmp/check-no-audit.log"
 run_case check-relay-mismatch existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-bad"
 compare check-relay-mismatch "$tmp/check-relay-mismatch.log"
+run_case check-no-orgpolicy no-orgpolicy with-keeper "$fixtures/record" check.sh
+compare check-no-orgpolicy "$tmp/check-no-orgpolicy.log"
+mkdir "$tmp/record-multi"
+cat "$fixtures/record/keeper.json" "$fixtures/record/keeper.json" >"$tmp/record-multi/keeper.json"
+cp "$fixtures/record/keeper.pem" "$tmp/record-multi/"
+run_case check-record-multi existing with-keeper "$tmp/record-multi" check.sh
+compare check-record-multi "$tmp/check-record-multi.log"
 run_case check-relay-decoy existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-decoy"
 compare check-relay-decoy "$tmp/check-relay-decoy.log"
+run_case check-relay-fused existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-fused"
+compare check-relay-fused "$tmp/check-relay-fused.log"
 run_case check-relay-ambiguous existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-ambiguous"
 compare check-relay-ambiguous "$tmp/check-relay-ambiguous.log"
 run_case check-bad-args existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-ok" extra

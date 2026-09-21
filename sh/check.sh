@@ -143,6 +143,14 @@ else
   ok "project audit config has the $KMS_SERVICE entry"
 fi
 
+# Org policy: no service-account keys can be minted in the key project. A
+# failed read is gcloud's failure, exit 1, like every other read here.
+if org_policy_enforced; then
+  ok "$SA_KEY_CONSTRAINT is enforced on $KEY_PROJECT"
+else
+  fail "$EXIT_ORG_POLICY" "$SA_KEY_CONSTRAINT is not enforced on $KEY_PROJECT"
+fi
+
 # Relay repo (optional)
 if [ -n "$relay_dir" ]; then
   deploy=$relay_dir/script/Deploy.s.sol
@@ -153,11 +161,12 @@ if [ -n "$relay_dir" ]; then
     # literals removed and lines joined: not a commented-out old value, not a
     # KEEPER_* identifier, not a `KEEPER ==` comparison, and wrapped
     # assignments still match. The literal may be wrapped in any number of
-    # address(...) or payable(...) casts. `$` is an identifier character in
-    # Solidity, so `$KEEPER` is not KEEPER. Exactly one distinct address is
-    # required.
+    # address(...) or payable(...) casts and must end there: a longer hex
+    # literal is not an address. `$` is an identifier character in Solidity,
+    # so `$KEEPER` is not KEEPER, and `cfg.KEEPER` is a member, not the
+    # constant. Exactly one distinct address is required.
     relay_addresses=$(strip_solidity_comments <"$deploy" |
-      grep -Eo '(^|[^A-Za-z0-9_$])KEEPER[[:space:]]*=[[:space:]]*((address|payable)\([[:space:]]*)*0x[0-9a-fA-F]{40}' |
+      grep -Eo '(^|[^A-Za-z0-9_$.])KEEPER[[:space:]]*=[[:space:]]*((address|payable)\([[:space:]]*)*0x[0-9a-fA-F]{40}([^0-9a-fA-F_]|$)' |
       grep -Eo '0x[0-9a-fA-F]{40}' | tr 'A-F' 'a-f' | sort -u)
     relay_count=$(printf '%s' "$relay_addresses" | grep -c . || true)
     relay_keeper=$(printf '%s' "$relay_addresses" | head -n 1)
