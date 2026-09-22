@@ -1,8 +1,0 @@
-{
-  "key": "projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/keeper",
-  "version": "projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/keeper/cryptoKeyVersions/1",
-  "algorithm": "EC_SIGN_SECP256K1_SHA256",
-  "protectionLevel": "HSM",
-  "address": "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf",
-  "pemSha256": "3cd768275e92d4adbd472ad62390666c6b4ca820032f3167ede4a87e41fd38fc"
-}

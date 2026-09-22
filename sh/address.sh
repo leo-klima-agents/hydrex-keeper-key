@@ -7,11 +7,11 @@ script_dir=$(dirname -- "$0")
 . "$script_dir/lib.sh"
 
 force=no
-[ $# -le 1 ] || die "$EXIT_CONFIG" "usage: $0 [--force]"
+[ $# -le 1 ] || die "usage: $0 [--force]"
 case "${1:-}" in
   "") ;;
   --force) force=yes ;;
-  *) die "$EXIT_CONFIG" "usage: $0 [--force]" ;;
+  *) die "usage: $0 [--force]" ;;
 esac
 
 require_tools openssl cast
@@ -19,9 +19,9 @@ load_config
 make_tmp
 
 key=$(find_key)
-[ -n "$key" ] || die "$EXIT_KEY_ATTRIBUTES" "$KEY_NAME not found; run setup.sh"
+[ -n "$key" ] || die "$KEY_NAME not found; run setup.sh"
 describe_version_1
-[ "$version_state" = "ENABLED" ] || die "$EXIT_VERSION_STATE" "version 1 is $version_state"
+[ "$version_state" = "ENABLED" ] || die "version 1 is $version_state"
 
 pem=$TMP/keeper.pem
 gcloud kms keys versions get-public-key "$KEY_VERSION_NAME" --output-file="$pem"
@@ -31,7 +31,7 @@ pem_sha=$(sha256_file "$pem")
 if [ -f "$RECORD_DIR/keeper.json" ] && [ "$force" = no ]; then
   read_record
   if [ "$recorded_version" != "$KEY_VERSION_NAME" ] || [ "$recorded_address" != "$address" ]; then
-    die "$EXIT_RECORD" "record has $recorded_address for $recorded_version; live key is $address for $KEY_VERSION_NAME. A new key means a new module; --force to overwrite"
+    die "record has $recorded_address for $recorded_version; live key is $address for $KEY_VERSION_NAME. A new key means a new module; --force to overwrite"
   fi
   if [ -f "$RECORD_DIR/keeper.pem" ] && [ "$recorded_sha" = "$pem_sha" ] &&
     [ "$(sha256_file "$RECORD_DIR/keeper.pem")" = "$pem_sha" ]; then

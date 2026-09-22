@@ -38,11 +38,16 @@ if [ -z "$key" ]; then
     --protection-level="$KEY_PROTECTION" \
     --destroy-scheduled-duration="$DESTROY_WINDOW"
 else
-  read_key_attributes "$key" ||
-    die "$EXIT_KEY_ATTRIBUTES" "$KEY_NAME exists with purpose=$purpose algorithm=$algorithm protectionLevel=$protection; not adopting it"
+  purpose=$(printf '%s\n' "$key" | jq -r '.purpose // ""')
+  algorithm=$(printf '%s\n' "$key" | jq -r '.versionTemplate.algorithm // ""')
+  protection=$(printf '%s\n' "$key" | jq -r '.versionTemplate.protectionLevel // ""')
+  window=$(printf '%s\n' "$key" | jq -r '.destroyScheduledDuration // ""')
+  if [ "$purpose" != "$KEY_PURPOSE_API" ] || [ "$algorithm" != "$KEY_ALGORITHM_API" ] || [ "$protection" != "$KEY_PROTECTION_API" ]; then
+    die "$KEY_NAME exists with purpose=$purpose algorithm=$algorithm protectionLevel=$protection; not adopting it"
+  fi
   # destroyScheduledDuration cannot be updated.
   [ "$window" = "$DESTROY_WINDOW_API" ] ||
-    die "$EXIT_DESTROY_WINDOW" "$KEY_NAME has destroy window ${window:-unset}, expected $DESTROY_WINDOW_API; immutable, use another KEY name"
+    die "$KEY_NAME has destroy window ${window:-unset}, expected $DESTROY_WINDOW_API; immutable, use another KEY name"
   log "exists: $KEY_NAME"
 fi
 
