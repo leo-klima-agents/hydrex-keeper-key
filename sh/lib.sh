@@ -101,7 +101,7 @@ render_key_policy() {
 # Field readers: one jq per resource, tab-separated, read into named variables.
 TAB=$(printf '\t')
 json_fields() { # JSON JQ_ARRAY_EXPR
-  printf '%s\n' "$1" | jq -r "$2 | map(. // \"\") | @tsv" || die "cannot parse JSON"
+  printf '%s\n' "$1" | jq -r "$2 | map(.//\"\") | @tsv" || die "cannot parse JSON"
 }
 
 # Sets purpose, algorithm, protection, window from a cryptoKey; true if the first three are expected.
@@ -126,8 +126,7 @@ EOT
 read_record() {
   record_file=$RECORD_DIR/keeper.json
   [ -f "$record_file" ] || die "$record_file missing; run address.sh"
-  record_json=$(jq -c 'if type == "object" then . else error("not an object") end' "$record_file" 2>/dev/null) ||
-    die "$record_file is not a JSON object"
+  record_json=$(jq -ce 'select(type == "object")' "$record_file" 2>/dev/null) || die "$record_file is not a JSON object"
   record_fields=$(json_fields "$record_json" '[.version, .address, .pemSha256]')
   IFS=$TAB read -r recorded_version recorded_address recorded_sha <<EOT
 $record_fields
