@@ -1,143 +1,85 @@
 # hydrex-keeper-key
 
-Part two of three. Part one, `hydrex-conduit-executor`, is an immutable Safe module whose `KEEPER` is an EOA address. Part three signs with that key from a Cloud Run job. This repo creates the key in Cloud KMS, records its Ethereum address for part one, and checks for drift. No secrets: the private key never leaves the HSM.
+Creates the keeper's signing key in Cloud KMS, records its Ethereum address for `hydrex-conduit-executor` (part one), grants the keeper service (part three) the right to sign with it, and checks that nothing has drifted. The private key never leaves the HSM; this repo holds only public material.
 
-## Model
+Two GCP projects. The key project holds one key ring and one key, administered by a small human group. The keeper project holds the runtime and receives one grant: signer on the key. IAM on the key is always written in full from `policy/key.iam.json.tmpl`; nothing is ever added to what is there.
 
-Two GCP projects.
+## Prerequisites
 
-- **Key project**: one key ring, one key, nothing else. `roles/cloudkms.admin` on the key for a small human group behind hardware 2FA. KMS Data Access audit logs on. Destroy window 120 days.
-- **Keeper project**: the runtime. Receives one cross-project grant: `roles/cloudkms.signer` and `roles/cloudkms.publicKeyViewer` on the key, to the job's service account.
+`gcloud` 470 or newer, `jq`, `openssl`, and `cast` from [Foundry](https://getfoundry.sh).
 
-IAM is written authoritatively: one template, `policy/key.iam.json.tmpl`, written in full by `setup.sh` and `grant.sh`. Nothing adds a binding to what is there.
+| Script | Needs |
+|---|---|
+| `setup.sh` | `roles/owner` on the key project. `roles/orgpolicy.policyAdmin` on the org or folder for step 6, otherwise it warns and continues. |
+| `address.sh`, `check.sh` | membership of the admin group |
+| `grant.sh` | admin group, plus `roles/iam.serviceAccountViewer` on the keeper project |
 
-POSIX shell over `gcloud`, not OpenTofu: five resources, no state, no providers, every call readable.
-
-## Layout
-
-```
-config.env.example           inputs; copy to config.env (gitignored)
-sh/lib.sh                    config, checks, policy render, authoritative IAM
-sh/setup.sh                  key project resources, idempotent
-sh/grant.sh                  the cross-project binding, idempotent
-sh/address.sh                public key -> address, writes record/
-sh/check.sh                  live state vs record/ and expected IAM
-policy/key.iam.json.tmpl     complete key IAM policy
-policy/audit.json            KMS auditConfigs entry
-record/                      keeper.pem, keeper.json (written by address.sh)
-test/fake-gcloud, test/run.sh, test/golden/
-.github/workflows/ci.yml     lint and golden tests on push
-```
-
-## 1. Prerequisites
-
-`gcloud` >= 470.0.0 and `jq`. `openssl` and `cast` ([Foundry](https://getfoundry.sh)) for `address.sh` and `check.sh`. Any POSIX `sh` with `awk`, `od`, `tail` and `tr`; CI uses `dash`.
-
-| Script | Where | Role |
-|---|---|---|
-| `setup.sh` | key project | `roles/owner`, or `serviceusage.serviceUsageAdmin` + `cloudkms.admin` + `resourcemanager.projectIamAdmin` |
-| `setup.sh` step 6 | org or folder | `roles/orgpolicy.policyAdmin`; optional, warns without it |
-| `address.sh` | key | `roles/cloudkms.admin` via the admin group |
-| `grant.sh` | key, keeper project | admin group; `roles/iam.serviceAccountViewer` on the keeper project |
-| `check.sh` | key project | the admin group, or `roles/viewer` plus `roles/cloudkms.publicKeyViewer` granted at project level (the key's own policy is the template and would drop it) |
-
-## 2. config.env
+## 1. Configure
 
 ```sh
 cp config.env.example config.env
 ```
 
-`KEEPER_SA` stays empty until part three exists.
+Fill in every value. Leave `KEEPER_SA` empty until part three has created the job's service account.
 
-**Location.** Default `us`. One signature per weekly vote, so latency is irrelevant; multi-region buys availability; `us` matches where Base's sequencer is observed to run. Changing it changes the resource names and the record, so choose once.
+Location defaults to `us`. One signature a week makes latency irrelevant; multi-region gives availability. Changing it later changes the resource names and the record, so choose once.
 
-## 3. setup.sh
+## 2. Create the key project resources
 
 ```sh
 sh/setup.sh
 ```
 
-1. Enables `cloudkms.googleapis.com`.
-2. Creates the key ring if absent.
-3. Creates the key if absent: `asymmetric-signing`, `ec-sign-secp256k1-sha256`, `hsm`, destroy window `120d`. An existing key with other attributes or another window is refused; the window is immutable, so use another `KEY` name.
-4. Writes the key IAM policy from the template. Admin group alone until `KEEPER_SA` is set.
-5. Replaces the `cloudkms.googleapis.com` audit entry in the project policy. Project bindings are left alone.
-6. Enforces `iam.disableServiceAccountKeyCreation` if permitted; otherwise warns.
-7. Prints the version 1 resource name and state. HSM generation takes a moment.
+Enables KMS, creates the key ring and the key (asymmetric signing, secp256k1, HSM, 120-day destroy window), writes the key IAM policy, turns on KMS Data Access audit logs, and enforces `iam.disableServiceAccountKeyCreation` on the project. Safe to re-run; a second run changes nothing. An existing key with different attributes is refused.
 
-Confirm in the console: one ring, one key, one version, HSM, secp256k1, 120 days, admin group only, all three KMS audit log types on. A second run makes no writes.
+Confirm in the console: one ring, one key, one version, HSM, secp256k1, 120 days, only the admin group on the key, all three KMS audit log types on.
 
-## 4. address.sh
+## 3. Record the address
 
 ```sh
 sh/address.sh
 git add record/ && git commit -m "record: keeper key version 1"
 ```
 
-Same key: no-op. Different key or address in the record: refused unless `--force`.
+Writes `record/keeper.pem` and `record/keeper.json`. Re-running against the same key changes nothing. If the record names a different key or address it refuses; `--force` overrides, which is only right when a new key and a new module are intended.
 
-By hand:
+To verify the address without the script:
 
 ```sh
-gcloud kms keys versions get-public-key .../cryptoKeyVersions/1 --output-file=keeper.pem
-openssl pkey -pubin -in keeper.pem -outform DER -out keeper.der   # 88 bytes
-XY=$(tail -c 64 keeper.der | od -An -v -tx1 | tr -d ' \n')       # X||Y
-HASH=$(cast keccak "0x$XY")
-cast to-check-sum-address "0x$(printf '%s' "$HASH" | tail -c 40)"
+openssl pkey -pubin -in record/keeper.pem -outform DER -out keeper.der
+XY=$(tail -c 64 keeper.der | od -An -v -tx1 | tr -d ' \n')
+cast to-check-sum-address "0x$(cast keccak "0x$XY" | tr -d '\n' | tail -c 40)"
 ```
 
-`test/golden/address.txt` runs this over the secp256k1 generator point and gets `0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf`, the known address for private key 1.
+## 4. Deploy part one
 
-## 5. Part one
+`address` in `record/keeper.json` is `KEEPER`. It is immutable in the module, so a new key means a new module. Have part one read the address from a copy of `record/keeper.json` rather than paste it.
 
-`address` in `record/keeper.json` is `KEEPER`. `KEEPER` is immutable, so a new key means a new module; this repo never creates version 2. Part one's deploy script should read the address from a copy of `record/keeper.json` rather than repeat the literal.
+## 5. Grant the keeper
 
-## 6. grant.sh
-
-Set `KEEPER_SA` in `config.env`, then:
+Once part three has created the job's service account, set `KEEPER_SA` in `config.env` and run:
 
 ```sh
 sh/grant.sh
 ```
 
-Verifies the account exists, writes the full policy. Idempotent.
+Safe to re-run.
 
-## 7. check.sh
+## 6. Check for drift
 
 ```sh
 sh/check.sh
 ```
 
-Read-only. Re-derives the address from the live key and compares it with `record/`; asserts version 1 is `ENABLED` and the only version, key and version attributes and destroy window are unchanged, the key IAM policy equals the template, the audit entry is present, and the org policy is enforced. Every check runs; exit 1 if any failed. Once `grant.sh` has run, `KEEPER_SA` must be set in `config.env` or the grant reads as drift.
+Read-only. Fails if the live key no longer derives to the recorded address, a second version exists, version 1 is not enabled, key attributes or destroy window changed, the key IAM policy differs from the template, the audit config or org policy is off. Run it after each step above and on a schedule of your choosing. After step 5, `KEEPER_SA` must be set in `config.env` or the grant reads as drift.
 
-Run it by hand after each step and periodically. Part three's scheduler can take it over.
+## Outside the scripts
 
-## Manual steps
+1. Enforce hardware 2FA on the admin group in Workspace.
+2. KMS audit logs land in `_Default`, which keeps 30 days. Sink them to a locked bucket with longer retention in a project the admins do not own.
+3. Admins can schedule the key's destruction and cancel it within 120 days. Alert on `DestroyCryptoKeyVersion` and `UpdateCryptoKeyVersion`.
+4. A project owner can always re-grant `cloudkms.admin`. The key project's owners must be the admin group or fewer, with no org-level owner reaching it. Nothing here can check this.
 
-1. **Hardware 2FA** on the admin group, enforced in Workspace.
-2. **Audit log retention.** `_Default` keeps 30 days. Sink KMS logs to a locked bucket with 400+ days, in a project the admins do not own.
-3. **Scheduled destruction.** Admins can schedule and cancel it within 120 days. Alert on `DestroyCryptoKeyVersion` and `UpdateCryptoKeyVersion`.
-4. **Project ownership is the root.** An owner can re-grant `cloudkms.admin`. Key project owners must be the admin group or fewer, with no org-level owner reaching it. `check.sh` cannot assert this.
+## Development
 
-## Tests
-
-```sh
-test/run.sh            # goldens under dash
-test/run.sh --update   # regenerate after an intended change
-```
-
-CI: `shellcheck -s sh`, `checkbashisms`, `sh -n`, `reuse lint`, goldens. Goldens hold every gcloud call, the exact policy JSON written, exit codes and files written. Nothing in CI has GCP access.
-
-## Open decisions
-
-1. Admin group membership, and whether key project owners are the same people.
-2. Who runs `check.sh` and how often, until part three schedules it.
-
-## Constraints
-
-- `gcloud kms asymmetric-sign` hashes its input, so signature-recovery tests belong in part three.
-- The address is the property of key version 1 alone. `check.sh` fails if another appears.
-
-## License
-
-MIT. REUSE compliant.
+`test/run.sh` runs every script under `dash` against a fake `gcloud` and diffs the calls against `test/golden/`; `--update` regenerates after an intended change. CI runs lint and these tests. Nothing in CI touches GCP.
