@@ -1,5 +1,5 @@
 #!/bin/sh
-# Sourced by every script in sh/. POSIX sh.
+# Sourced by every script in sh/.
 # shellcheck disable=SC2034
 
 MIN_GCLOUD_VERSION=470.0.0
@@ -33,7 +33,7 @@ make_tmp() {
   trap 'exit 143' TERM
 }
 
-# version_ge HAVE MIN: numeric compare of the first three dotted components.
+# version_ge HAVE MIN: compares the first three dotted numbers.
 version_ge() {
   printf '%s %s\n' "$1" "$2" | awk '{
     split($1, a, "."); split($2, b, ".")
@@ -57,7 +57,7 @@ require_tools() {
 
 load_config() {
   [ -f "$CONFIG_FILE" ] || die "$CONFIG_FILE missing; copy config.env.example"
-  case "$CONFIG_FILE" in */*) ;; *) CONFIG_FILE=./$CONFIG_FILE ;; esac # `.` searches PATH otherwise
+  case "$CONFIG_FILE" in */*) ;; *) CONFIG_FILE=./$CONFIG_FILE ;; esac # else `.` searches PATH
   unset KEY_PROJECT KEEPER_PROJECT LOCATION KEY_RING KEY ADMIN_GROUP KEEPER_SA
   # shellcheck source=/dev/null
   . "$CONFIG_FILE"
@@ -98,13 +98,12 @@ render_key_policy() {
   ' "$POLICY_DIR/key.iam.json.tmpl"
 }
 
-# Field readers: one jq per resource, tab-separated, read into named variables.
 TAB=$(printf '\t')
 json_fields() { # JSON JQ_ARRAY_EXPR
   printf '%s\n' "$1" | jq -r "$2 | map(.//\"\") | @tsv" || die "cannot parse JSON"
 }
 
-# Sets purpose, algorithm, protection, window from a cryptoKey; true if the first three are expected.
+# Sets purpose, algorithm, protection, window. True if the first three are as expected.
 read_key_attrs() {
   key_fields=$(json_fields "$1" '[.purpose, .versionTemplate.algorithm, .versionTemplate.protectionLevel, .destroyScheduledDuration]')
   IFS=$TAB read -r purpose algorithm protection window <<EOT
@@ -113,7 +112,7 @@ EOT
   [ "$purpose" = "$KEY_PURPOSE_API" ] && [ "$algorithm" = "$KEY_ALGORITHM_API" ] && [ "$protection" = "$KEY_PROTECTION_API" ]
 }
 
-# Sets version_state, version_algorithm, version_protection from a cryptoKeyVersion; true if the last two are expected.
+# Sets version_state, version_algorithm, version_protection. True if the last two are as expected.
 read_version_attrs() {
   version_fields=$(json_fields "$1" '[.state, .algorithm, .protectionLevel]')
   IFS=$TAB read -r version_state version_algorithm version_protection <<EOT
@@ -133,7 +132,7 @@ $record_fields
 EOT
 }
 
-# Filtered lists: absence is an empty result, not an error to parse.
+# A filtered list returns empty when the resource is absent, instead of an error.
 find_keyring() {
   find_keyring_list=$(gcloud kms keyrings list --project="$KEY_PROJECT" --location="$LOCATION" \
     --filter="name=$KEY_RING_NAME" --format=json)
@@ -158,7 +157,7 @@ describe_version_1() {
   read_version_attrs "$version_json" || die "version 1 is algorithm=$version_algorithm protectionLevel=$version_protection"
 }
 
-# Canonical policy: sorted bindings and audit configs, no etag or version. stdin -> stdout.
+# Canonical policy: sorted bindings and audit configs, without etag and version.
 normalize_policy() {
   jq -S '{
     bindings: ((.bindings // [])
@@ -179,7 +178,7 @@ policy_differs() {
   [ "$live_norm" != "$desired_norm" ]
 }
 
-# Prints the expected-vs-live diff from the last policy_differs to stderr.
+# Prints the diff from the last policy_differs.
 show_policy_diff() {
   printf '%s\n' "$desired_norm" >"$TMP/expected.json"
   printf '%s\n' "$live_norm" >"$TMP/live.json"
@@ -193,8 +192,7 @@ get_iam() {
   gcloud "$@" get-iam-policy "$iam_resource" --format=json
 }
 
-# write_iam_if_changed RESOURCE LIVE DESIRED gcloud-subcommand...
-# Writes DESIRED in full with LIVE's etag. Never merges.
+# write_iam_if_changed RESOURCE LIVE DESIRED gcloud-subcommand...: writes DESIRED in full with LIVE's etag.
 write_iam_if_changed() {
   iam_resource=$1
   iam_live=$2
@@ -220,7 +218,7 @@ set_iam_authoritative() {
   write_iam_if_changed "$set_iam_resource" "$set_iam_live" "$set_iam_desired" "$@"
 }
 
-# derive_address PEM: PEM -> DER -> last 64 bytes (X||Y) -> keccak256 -> last 20 bytes -> EIP-55.
+# derive_address PEM: DER, last 64 bytes (X||Y), keccak256, last 20 bytes, EIP-55 checksum.
 SECP256K1_SPKI_PREFIX=3056301006072a8648ce3d020106052b8104000a03420004
 
 derive_address() {

@@ -16,7 +16,7 @@ case "$FAKE_GCLOUD_SCENARIO" in
   admin-only) key_policy='admin' ;;
   extra-binding) key_policy=extra ;;
   two-versions) versions=two ;;
-  warn) orgpolicy=unset warn=yes ;; # not enforced, and gcloud chatters on stderr
+  warn) orgpolicy=unset warn=yes ;; # not enforced; gcloud prints a warning on stderr
   *) printf 'fake-gcloud: unknown scenario %s\n' "$FAKE_GCLOUD_SCENARIO" >&2; exit 98 ;;
 esac
 
@@ -83,7 +83,7 @@ log_call() {
   [ "$warn" = no ] || printf 'WARNING: Updates are available for some Google Cloud CLI components.\n' >&2
 }
 
-# Requires the etag the fake handed out; logs canonical JSON in place of the path.
+# Checks the etag matches what the fake returned; logs the file as canonical JSON.
 log_set_policy() { # EXPECTED_ETAG ARGS...
   expected_etag=$1
   shift

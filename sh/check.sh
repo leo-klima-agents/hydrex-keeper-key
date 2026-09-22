@@ -18,8 +18,7 @@ fail() {
 }
 ok() { log "ok: $*"; }
 
-# Record. Problems here are reported and the address comparison skipped;
-# the live checks still run.
+# Record problems are reported; only the address comparison is skipped.
 record_ok=yes
 read_record
 if [ -z "$recorded_address" ] || [ -z "$recorded_version" ] || [ -z "$recorded_sha" ]; then
@@ -80,7 +79,7 @@ else
   fi
 fi
 
-# Address. Needs a consistent record and an ENABLED secp256k1 version.
+# Address
 if [ "$record_ok" = yes ] && [ "$version_state" = "ENABLED" ] && [ "$version_ok" = yes ]; then
   pem=$TMP/live.pem
   gcloud kms keys versions get-public-key "$KEY_VERSION_NAME" --output-file="$pem"
