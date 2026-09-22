@@ -38,13 +38,8 @@ if [ -z "$key" ]; then
     --protection-level="$KEY_PROTECTION" \
     --destroy-scheduled-duration="$DESTROY_WINDOW"
 else
-  purpose=$(printf '%s\n' "$key" | jq -r '.purpose // ""')
-  algorithm=$(printf '%s\n' "$key" | jq -r '.versionTemplate.algorithm // ""')
-  protection=$(printf '%s\n' "$key" | jq -r '.versionTemplate.protectionLevel // ""')
-  window=$(printf '%s\n' "$key" | jq -r '.destroyScheduledDuration // ""')
-  if [ "$purpose" != "$KEY_PURPOSE_API" ] || [ "$algorithm" != "$KEY_ALGORITHM_API" ] || [ "$protection" != "$KEY_PROTECTION_API" ]; then
+  read_key_attrs "$key" ||
     die "$KEY_NAME exists with purpose=$purpose algorithm=$algorithm protectionLevel=$protection; not adopting it"
-  fi
   # destroyScheduledDuration cannot be updated.
   [ "$window" = "$DESTROY_WINDOW_API" ] ||
     die "$KEY_NAME has destroy window ${window:-unset}, expected $DESTROY_WINDOW_API; immutable, use another KEY name"
@@ -64,15 +59,16 @@ desired=$(printf '%s\n' "$project_policy" | jq --slurpfile audit "$POLICY_DIR/au
 write_iam_if_changed "$KEY_PROJECT" "$project_policy" "$desired" projects
 
 log "== 6/7 org policy"
-if org_policy_enforced 2>"$TMP/orgpolicy.err"; then
-  log "$SA_KEY_CONSTRAINT enforced"
-elif [ -s "$TMP/orgpolicy.err" ]; then
-  log "WARNING: cannot read $SA_KEY_CONSTRAINT: $(cat "$TMP/orgpolicy.err")"
-elif gcloud resource-manager org-policies enable-enforce "$SA_KEY_CONSTRAINT" --project="$KEY_PROJECT" >/dev/null 2>"$TMP/orgpolicy.err"; then
-  log "$SA_KEY_CONSTRAINT now enforced"
-else
-  log "WARNING: cannot enforce $SA_KEY_CONSTRAINT (needs orgpolicy.policy.set): $(cat "$TMP/orgpolicy.err")"
-fi
+org_policy_enforced && org_status=0 || org_status=$?
+case "$org_status" in
+  0) log "$SA_KEY_CONSTRAINT enforced" ;;
+  2) log "WARNING: cannot read $SA_KEY_CONSTRAINT; not setting it" ;;
+  *) if gcloud resource-manager org-policies enable-enforce "$SA_KEY_CONSTRAINT" --project="$KEY_PROJECT" >/dev/null; then
+       log "$SA_KEY_CONSTRAINT now enforced"
+     else
+       log "WARNING: cannot enforce $SA_KEY_CONSTRAINT (needs orgpolicy.policy.set)"
+     fi ;;
+esac
 
 log "== 7/7 key version"
 describe_version_1

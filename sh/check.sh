@@ -18,23 +18,30 @@ fail() {
 }
 ok() { log "ok: $*"; }
 
-# Record
-[ -f "$RECORD_DIR/keeper.pem" ] || die "$RECORD_DIR/keeper.pem missing; run address.sh"
+# Record. Problems here are reported and the address comparison skipped;
+# the live checks still run.
+record_ok=yes
 read_record
 if [ -z "$recorded_address" ] || [ -z "$recorded_version" ] || [ -z "$recorded_sha" ]; then
-  die "record lacks address, version or pemSha256"
+  fail "record lacks address, version or pemSha256"
+  record_ok=no
+elif [ "$recorded_version" != "$KEY_VERSION_NAME" ]; then
+  fail "record is for $recorded_version, config is $KEY_VERSION_NAME"
+  record_ok=no
+elif [ ! -f "$RECORD_DIR/keeper.pem" ]; then
+  fail "$RECORD_DIR/keeper.pem missing; run address.sh"
+  record_ok=no
+elif [ "$(sha256_file "$RECORD_DIR/keeper.pem")" != "$recorded_sha" ]; then
+  fail "keeper.pem does not match pemSha256"
+  record_ok=no
+else
+  ok "record is consistent"
 fi
-[ "$recorded_version" = "$KEY_VERSION_NAME" ] || die "record is for $recorded_version, config is $KEY_VERSION_NAME"
-[ "$(sha256_file "$RECORD_DIR/keeper.pem")" = "$recorded_sha" ] || die "keeper.pem does not match pemSha256"
 
 # Key
 key=$(find_key)
 [ -n "$key" ] || die "$KEY_NAME not found"
-purpose=$(printf '%s\n' "$key" | jq -r '.purpose // ""')
-algorithm=$(printf '%s\n' "$key" | jq -r '.versionTemplate.algorithm // ""')
-protection=$(printf '%s\n' "$key" | jq -r '.versionTemplate.protectionLevel // ""')
-window=$(printf '%s\n' "$key" | jq -r '.destroyScheduledDuration // ""')
-if [ "$purpose" = "$KEY_PURPOSE_API" ] && [ "$algorithm" = "$KEY_ALGORITHM_API" ] && [ "$protection" = "$KEY_PROTECTION_API" ]; then
+if read_key_attrs "$key"; then
   ok "key is $purpose $algorithm $protection"
 else
   fail "key is purpose=$purpose algorithm=$algorithm protectionLevel=$protection"
@@ -60,10 +67,7 @@ else
   else
     fail "$count key versions: $listed"
   fi
-  version_state=$(printf '%s\n' "$version1" | jq -r '.state // ""')
-  version_algorithm=$(printf '%s\n' "$version1" | jq -r '.algorithm // ""')
-  version_protection=$(printf '%s\n' "$version1" | jq -r '.protectionLevel // ""')
-  if [ "$version_algorithm" = "$KEY_ALGORITHM_API" ] && [ "$version_protection" = "$KEY_PROTECTION_API" ]; then
+  if read_version_attrs "$version1"; then
     ok "version 1 is $version_algorithm $version_protection"
     version_ok=yes
   else
@@ -76,8 +80,8 @@ else
   fi
 fi
 
-# Address. Only an ENABLED secp256k1 version has a public key to derive from.
-if [ "$version_state" = "ENABLED" ] && [ "$version_ok" = yes ]; then
+# Address. Needs a consistent record and an ENABLED secp256k1 version.
+if [ "$record_ok" = yes ] && [ "$version_state" = "ENABLED" ] && [ "$version_ok" = yes ]; then
   pem=$TMP/live.pem
   gcloud kms keys versions get-public-key "$KEY_VERSION_NAME" --output-file="$pem"
   live_address=$(derive_address "$pem")
@@ -96,9 +100,7 @@ live_policy=$(get_iam "$KEY_NAME" kms keys)
 expected_policy=$(render_key_policy)
 if policy_differs "$live_policy" "$expected_policy"; then
   fail "key IAM policy differs from template"
-  printf '%s\n' "$desired_norm" >"$TMP/expected.json"
-  printf '%s\n' "$live_norm" >"$TMP/live.json"
-  diff -u "$TMP/expected.json" "$TMP/live.json" >&2 || true
+  show_policy_diff
 else
   ok "key IAM policy matches template"
 fi
@@ -110,17 +112,19 @@ live_audit=$(printf '%s\n' "$project_policy" |
     '{auditConfigs: ((.auditConfigs // []) | map(select(.service == $audit[0].service)))}')
 expected_audit=$(jq -c '{auditConfigs: [.]}' "$POLICY_DIR/audit.json")
 if policy_differs "$live_audit" "$expected_audit"; then
-  fail "audit config lacks $KMS_SERVICE entry"
+  fail "audit config for $KMS_SERVICE differs from policy/audit.json"
+  show_policy_diff
 else
-  ok "audit config has $KMS_SERVICE entry"
+  ok "audit config for $KMS_SERVICE matches policy/audit.json"
 fi
 
-# Org policy
-if org_policy_enforced; then
-  ok "$SA_KEY_CONSTRAINT enforced"
-else
-  fail "$SA_KEY_CONSTRAINT not enforced"
-fi
+# Org policy. A failed read is a gcloud failure, not drift.
+org_policy_enforced && org_status=0 || org_status=$?
+case "$org_status" in
+  0) ok "$SA_KEY_CONSTRAINT enforced" ;;
+  2) die "cannot read $SA_KEY_CONSTRAINT" ;;
+  *) fail "$SA_KEY_CONSTRAINT not enforced" ;;
+esac
 
 [ "$failed" -ne 0 ] || log "all checks passed"
 exit "$failed"

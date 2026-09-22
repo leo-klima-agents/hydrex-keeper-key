@@ -33,9 +33,12 @@ make_tmp() {
   trap 'exit 143' TERM
 }
 
-# version_ge HAVE MIN, dotted numeric versions.
+# version_ge HAVE MIN: numeric compare of the first three dotted components.
 version_ge() {
-  [ "$(printf '%s\n%s\n' "$1" "$2" | sort -t. -k1,1n -k2,2n -k3,3n | head -n 1)" = "$2" ]
+  printf '%s %s\n' "$1" "$2" | awk '{
+    split($1, a, "."); split($2, b, ".")
+    for (i = 1; i <= 3; i++) { if (a[i] + 0 > b[i] + 0) exit 0; if (a[i] + 0 < b[i] + 0) exit 1 }
+    exit 0 }'
 }
 
 # require_tools [EXTRA...]: gcloud and jq, plus any named extras.
@@ -44,7 +47,8 @@ require_tools() {
   for tool in gcloud jq "$@"; do
     command -v "$tool" >/dev/null 2>&1 || die "$tool not found on PATH"
   done
-  gcloud_version=$(gcloud version --format=json | jq -r '."Google Cloud SDK" // ""')
+  gcloud_version_json=$(gcloud version --format=json)
+  gcloud_version=$(printf '%s\n' "$gcloud_version_json" | jq -r '."Google Cloud SDK" // ""')
   case "$gcloud_version" in
     "" | *[!0-9.]*) die "cannot parse gcloud version '$gcloud_version'" ;;
   esac
@@ -53,6 +57,8 @@ require_tools() {
 
 load_config() {
   [ -f "$CONFIG_FILE" ] || die "$CONFIG_FILE missing; copy config.env.example"
+  case "$CONFIG_FILE" in */*) ;; *) CONFIG_FILE=./$CONFIG_FILE ;; esac # `.` searches PATH otherwise
+  unset KEY_PROJECT KEEPER_PROJECT LOCATION KEY_RING KEY ADMIN_GROUP KEEPER_SA
   # shellcheck source=/dev/null
   . "$CONFIG_FILE"
   LOCATION=${LOCATION:-us}
@@ -92,14 +98,40 @@ render_key_policy() {
   ' "$POLICY_DIR/key.iam.json.tmpl"
 }
 
+# Field readers: one jq per resource, tab-separated, read into named variables.
+TAB=$(printf '\t')
+json_fields() { # JSON JQ_ARRAY_EXPR
+  printf '%s\n' "$1" | jq -r "$2 | map(. // \"\") | @tsv" || die "cannot parse JSON"
+}
+
+# Sets purpose, algorithm, protection, window from a cryptoKey; true if the first three are expected.
+read_key_attrs() {
+  key_fields=$(json_fields "$1" '[.purpose, .versionTemplate.algorithm, .versionTemplate.protectionLevel, .destroyScheduledDuration]')
+  IFS=$TAB read -r purpose algorithm protection window <<EOT
+$key_fields
+EOT
+  [ "$purpose" = "$KEY_PURPOSE_API" ] && [ "$algorithm" = "$KEY_ALGORITHM_API" ] && [ "$protection" = "$KEY_PROTECTION_API" ]
+}
+
+# Sets version_state, version_algorithm, version_protection from a cryptoKeyVersion; true if the last two are expected.
+read_version_attrs() {
+  version_fields=$(json_fields "$1" '[.state, .algorithm, .protectionLevel]')
+  IFS=$TAB read -r version_state version_algorithm version_protection <<EOT
+$version_fields
+EOT
+  [ "$version_algorithm" = "$KEY_ALGORITHM_API" ] && [ "$version_protection" = "$KEY_PROTECTION_API" ]
+}
+
 # Sets recorded_version, recorded_address, recorded_sha from record/keeper.json.
 read_record() {
   record_file=$RECORD_DIR/keeper.json
   [ -f "$record_file" ] || die "$record_file missing; run address.sh"
-  jq -e 'type == "object"' "$record_file" >/dev/null 2>&1 || die "$record_file is not a JSON object"
-  recorded_version=$(jq -r '.version // ""' "$record_file")
-  recorded_address=$(jq -r '.address // ""' "$record_file")
-  recorded_sha=$(jq -r '.pemSha256 // ""' "$record_file")
+  record_json=$(jq -c 'if type == "object" then . else error("not an object") end' "$record_file" 2>/dev/null) ||
+    die "$record_file is not a JSON object"
+  record_fields=$(json_fields "$record_json" '[.version, .address, .pemSha256]')
+  IFS=$TAB read -r recorded_version recorded_address recorded_sha <<EOT
+$record_fields
+EOT
 }
 
 # Filtered lists: absence is an empty result, not an error to parse.
@@ -115,21 +147,16 @@ find_key() {
   printf '%s\n' "$find_key_list" | jq -c --arg name "$KEY_NAME" '.[] | select(.name == $name)'
 }
 
+# 0 enforced, 1 not enforced, 2 could not read.
 org_policy_enforced() {
   org_policy_json=$(gcloud resource-manager org-policies describe "$SA_KEY_CONSTRAINT" \
-    --project="$KEY_PROJECT" --effective --format=json)
+    --project="$KEY_PROJECT" --effective --format=json) || return 2
   [ "$(printf '%s\n' "$org_policy_json" | jq -r '.booleanPolicy.enforced // false')" = "true" ]
 }
 
-# Sets version_state, version_algorithm, version_protection from live version 1.
 describe_version_1() {
   version_json=$(gcloud kms keys versions describe "$KEY_VERSION_NAME" --format=json)
-  version_state=$(printf '%s\n' "$version_json" | jq -r '.state // ""')
-  version_algorithm=$(printf '%s\n' "$version_json" | jq -r '.algorithm // ""')
-  version_protection=$(printf '%s\n' "$version_json" | jq -r '.protectionLevel // ""')
-  if [ "$version_algorithm" != "$KEY_ALGORITHM_API" ] || [ "$version_protection" != "$KEY_PROTECTION_API" ]; then
-    die "version 1 is algorithm=$version_algorithm protectionLevel=$version_protection"
-  fi
+  read_version_attrs "$version_json" || die "version 1 is algorithm=$version_algorithm protectionLevel=$version_protection"
 }
 
 # Canonical policy: sorted bindings and audit configs, no etag or version. stdin -> stdout.
@@ -151,6 +178,13 @@ policy_differs() {
   live_norm=$(printf '%s\n' "$1" | normalize_policy)
   desired_norm=$(printf '%s\n' "$2" | normalize_policy)
   [ "$live_norm" != "$desired_norm" ]
+}
+
+# Prints the expected-vs-live diff from the last policy_differs to stderr.
+show_policy_diff() {
+  printf '%s\n' "$desired_norm" >"$TMP/expected.json"
+  printf '%s\n' "$live_norm" >"$TMP/live.json"
+  diff -u "$TMP/expected.json" "$TMP/live.json" >&2 || true
 }
 
 # get_iam RESOURCE gcloud-subcommand...

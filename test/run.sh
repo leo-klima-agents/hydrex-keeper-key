@@ -65,6 +65,7 @@ compare() {
 golden_case setup-fresh fresh admin-only "$fixtures/empty" setup.sh
 golden_case setup-existing existing with-keeper "$fixtures/empty" setup.sh
 golden_case setup-foreign-key foreign-key admin-only "$fixtures/empty" setup.sh
+golden_case setup-warn warn with-keeper "$fixtures/empty" setup.sh # stderr chatter must not skip enable-enforce
 golden_case grant-fresh admin-only with-keeper "$fixtures/empty" grant.sh
 
 # address.sh output must equal test/fixtures/record, which the check cases read.
@@ -80,6 +81,14 @@ elif ! diff -u "$fixtures/record/keeper.json" "$tmp/record/keeper.json" 2>&1 ||
   printf 'FAIL    address: record differs from test/fixtures/record\n'
   failures=$((failures + 1))
 fi
+
+# The record refusal: a record for another address must not be overwritten.
+mkdir "$tmp/record-other"
+jq '.address = "0x0000000000000000000000000000000000000001"' "$fixtures/record/keeper.json" >"$tmp/record-other/keeper.json"
+cp "$fixtures/record/keeper.pem" "$tmp/record-other/"
+run_case address-refuse existing admin-only "$tmp/record-other" address.sh
+capture address-refuse record/keeper.json "$tmp/record-other/keeper.json"
+compare address-refuse
 
 golden_case check-ok existing with-keeper "$fixtures/record" check.sh
 golden_case check-extra-binding extra-binding with-keeper "$fixtures/record" check.sh
