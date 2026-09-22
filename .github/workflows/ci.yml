@@ -3,17 +3,12 @@ name: ci
 on:
   push:
   pull_request:
-  schedule:
-    # Weekly check.sh, Monday 09:00 UTC.
-    - cron: "0 9 * * 1"
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   lint:
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,36 +27,9 @@ jobs:
         uses: fsfe/reuse-action@v5
 
   golden:
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: foundry-rs/foundry-toolchain@v1
       - name: Golden tests
         run: TEST_SH=dash test/run.sh
-
-  # Only job with GCP access. Read-only, via Workload Identity Federation, no secret.
-  check:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    env:
-      KEY_PROJECT: ${{ vars.KEY_PROJECT }}
-      KEEPER_PROJECT: ${{ vars.KEEPER_PROJECT }}
-      LOCATION: ${{ vars.LOCATION }}
-      KEY_RING: ${{ vars.KEY_RING }}
-      KEY: ${{ vars.KEY }}
-      ADMIN_GROUP: ${{ vars.ADMIN_GROUP }}
-      KEEPER_SA: ${{ vars.KEEPER_SA }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
-          project_id: ${{ vars.KEY_PROJECT }}
-      - uses: google-github-actions/setup-gcloud@v2
-      - uses: foundry-rs/foundry-toolchain@v1
-      - name: check.sh
-        run: sh/check.sh

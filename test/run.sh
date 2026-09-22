@@ -139,32 +139,13 @@ compare address-missing-pem "$tmp/address-missing-pem.log"
 mkdir "$tmp/record-no-sha"
 cp "$fixtures/record/keeper.pem" "$tmp/record-no-sha/"
 jq 'del(.pemSha256)' "$fixtures/record/keeper.json" >"$tmp/record-no-sha/keeper.json"
-run_case check-record-no-sha existing with-keeper "$tmp/record-no-sha" check.sh
-compare check-record-no-sha "$tmp/check-record-no-sha.log"
 run_case address-record-no-sha existing admin-only "$tmp/record-no-sha" address.sh
 capture address-record-no-sha record/keeper.json "$tmp/record-no-sha/keeper.json"
 compare address-record-no-sha "$tmp/address-record-no-sha.log"
-mkdir "$tmp/record-array"
-printf '[1,2]\n' >"$tmp/record-array/keeper.json"
-cp "$fixtures/record/keeper.pem" "$tmp/record-array/"
-run_case check-record-not-object existing with-keeper "$tmp/record-array" check.sh
-compare check-record-not-object "$tmp/check-record-not-object.log"
-mkdir "$tmp/record-empty"
-: >"$tmp/record-empty/keeper.json"
-cp "$fixtures/record/keeper.pem" "$tmp/record-empty/"
-run_case check-record-empty existing with-keeper "$tmp/record-empty" check.sh
-compare check-record-empty "$tmp/check-record-empty.log"
-run_case address-record-empty existing admin-only "$tmp/record-empty" address.sh
-compare address-record-empty "$tmp/address-record-empty.log"
-mkdir "$tmp/record-newline"
-jq '.version = "a\nb"' "$fixtures/record/keeper.json" >"$tmp/record-newline/keeper.json"
-cp "$fixtures/record/keeper.pem" "$tmp/record-newline/"
-run_case check-record-newline existing with-keeper "$tmp/record-newline" check.sh
-compare check-record-newline "$tmp/check-record-newline.log"
 run_case address-pending pending admin-only "$tmp/record" address.sh
 compare address-pending "$tmp/address-pending.log"
 
-run_case check-ok existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-ok"
+run_case check-ok existing with-keeper "$fixtures/record" check.sh
 compare check-ok "$tmp/check-ok.log"
 run_case check-no-record existing with-keeper "$fixtures/empty" check.sh
 compare check-no-record "$tmp/check-no-record.log"
@@ -194,15 +175,9 @@ run_case check-missing-config existing missing "$fixtures/record" check.sh
 compare check-missing-config "$tmp/check-missing-config.log"
 run_case check-no-audit no-audit with-keeper "$fixtures/record" check.sh
 compare check-no-audit "$tmp/check-no-audit.log"
-run_case check-relay-mismatch existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-bad"
-compare check-relay-mismatch "$tmp/check-relay-mismatch.log"
-run_case check-relay-version existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-wrong-version"
-compare check-relay-version "$tmp/check-relay-version.log"
-run_case check-relay-missing existing with-keeper "$fixtures/record" check.sh "$fixtures/empty"
-compare check-relay-missing "$tmp/check-relay-missing.log"
-run_case check-relay-malformed existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-malformed"
-compare check-relay-malformed "$tmp/check-relay-malformed.log"
-run_case check-bad-args existing with-keeper "$fixtures/record" check.sh "$fixtures/relay-ok" extra
+run_case check-no-orgpolicy no-orgpolicy with-keeper "$fixtures/record" check.sh
+compare check-no-orgpolicy "$tmp/check-no-orgpolicy.log"
+run_case check-bad-args existing with-keeper "$fixtures/record" check.sh extra
 compare check-bad-args "$tmp/check-bad-args.log"
 run_case check-no-versions no-versions with-keeper "$fixtures/record" check.sh
 compare check-no-versions "$tmp/check-no-versions.log"

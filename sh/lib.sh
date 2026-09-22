@@ -2,20 +2,6 @@
 # Sourced by every script in sh/. POSIX sh.
 # shellcheck disable=SC2034
 
-# Exit codes. 1 is a failed gcloud call.
-EXIT_CONFIG=2
-EXIT_DEPENDENCY=3
-EXIT_KEY_ATTRIBUTES=10
-EXIT_DESTROY_WINDOW=11
-EXIT_VERSION_STATE=12
-EXIT_VERSION_COUNT=13
-EXIT_ADDRESS=14
-EXIT_KEY_IAM=15
-EXIT_AUDIT=16
-EXIT_RELAY=17
-EXIT_RECORD=18
-EXIT_ORG_POLICY=19
-
 MIN_GCLOUD_VERSION=470.0.0
 KMS_SERVICE=cloudkms.googleapis.com
 KEY_PURPOSE=asymmetric-signing
@@ -36,10 +22,8 @@ RECORD_DIR=${HYDREX_RECORD_DIR:-$REPO_ROOT/record}
 log() { printf '%s\n' "$*" >&2; }
 
 die() {
-  die_code=$1
-  shift
   log "error: $*"
-  exit "$die_code"
+  exit 1
 }
 
 make_tmp() {
@@ -50,7 +34,7 @@ make_tmp() {
 }
 
 require_tool() {
-  command -v "$1" >/dev/null 2>&1 || die "$EXIT_DEPENDENCY" "$1 not found on PATH$2"
+  command -v "$1" >/dev/null 2>&1 || die "$1 not found on PATH$2"
 }
 
 # version_ge HAVE MIN. First three components only.
@@ -86,22 +70,15 @@ require_tools() {
   gcloud_version_json=$(gcloud version --format=json)
   gcloud_version=$(printf '%s\n' "$gcloud_version_json" | jq -r '."Google Cloud SDK" // ""')
   case "$gcloud_version" in
-    "" | *[!0-9.]*) die "$EXIT_DEPENDENCY" "cannot parse gcloud version '$gcloud_version'" ;;
+    "" | *[!0-9.]*) die "cannot parse gcloud version '$gcloud_version'" ;;
   esac
-  version_ge "$gcloud_version" "$MIN_GCLOUD_VERSION" ||
-    die "$EXIT_DEPENDENCY" "gcloud $gcloud_version < $MIN_GCLOUD_VERSION"
+  version_ge "$gcloud_version" "$MIN_GCLOUD_VERSION" || die "gcloud $gcloud_version < $MIN_GCLOUD_VERSION"
 }
 
-# config.env is authoritative when present; otherwise the environment (CI).
 load_config() {
-  if [ -n "${HYDREX_CONFIG:-}" ] && [ ! -f "$CONFIG_FILE" ]; then
-    die "$EXIT_CONFIG" "HYDREX_CONFIG=$CONFIG_FILE does not exist"
-  fi
-  if [ -f "$CONFIG_FILE" ]; then
-    unset KEY_PROJECT KEEPER_PROJECT LOCATION KEY_RING KEY ADMIN_GROUP KEEPER_SA
-    # shellcheck source=/dev/null
-    . "$CONFIG_FILE"
-  fi
+  [ -f "$CONFIG_FILE" ] || die "$CONFIG_FILE missing; copy config.env.example"
+  # shellcheck source=/dev/null
+  . "$CONFIG_FILE"
   LOCATION=${LOCATION:-us}
   KEY_RING=${KEY_RING:-hydrex-keeper}
   KEY=${KEY:-keeper}
@@ -109,18 +86,18 @@ load_config() {
 
   for required in KEY_PROJECT KEEPER_PROJECT ADMIN_GROUP; do
     eval "value=\${$required:-}"
-    [ -n "$value" ] || die "$EXIT_CONFIG" "$required is not set (see config.env.example)"
+    [ -n "$value" ] || die "$required is not set in $CONFIG_FILE"
   done
   [ "$KEY_PROJECT" != "$KEEPER_PROJECT" ] ||
-    die "$EXIT_CONFIG" "KEY_PROJECT and KEEPER_PROJECT must differ"
+    die "KEY_PROJECT and KEEPER_PROJECT must differ"
   case "$ADMIN_GROUP" in
     *@*) ;;
-    *) die "$EXIT_CONFIG" "ADMIN_GROUP must be an email address" ;;
+    *) die "ADMIN_GROUP must be an email address" ;;
   esac
   if [ -n "$KEEPER_SA" ]; then
     case "$KEEPER_SA" in
       *"@$KEEPER_PROJECT.iam.gserviceaccount.com") ;;
-      *) die "$EXIT_CONFIG" "KEEPER_SA must be a service account in $KEEPER_PROJECT" ;;
+      *) die "KEEPER_SA must be a service account in $KEEPER_PROJECT" ;;
     esac
   fi
 
@@ -139,63 +116,14 @@ render_key_policy() {
   ' "$POLICY_DIR/key.iam.json.tmpl"
 }
 
-# Field readers: one jq call, one field per line, "end" so the last read never hits EOF.
-# Called inside conditions, so a jq failure dies explicitly.
-
-# Sets purpose, algorithm, protection, window. True if the first three are expected.
-read_key_attributes() {
-  key_fields=$(printf '%s\n' "$1" | jq -r '
-    (.purpose // ""), (.versionTemplate.algorithm // ""),
-    (.versionTemplate.protectionLevel // ""), (.destroyScheduledDuration // ""), "end"') ||
-    die 1 "cannot parse cryptoKey JSON"
-  {
-    read -r purpose
-    read -r algorithm
-    read -r protection
-    read -r window
-  } <<EOT
-$key_fields
-EOT
-  [ "$purpose" = "$KEY_PURPOSE_API" ] &&
-    [ "$algorithm" = "$KEY_ALGORITHM_API" ] &&
-    [ "$protection" = "$KEY_PROTECTION_API" ]
-}
-
-# Sets version_state, version_algorithm, version_protection. True if the last two are expected.
-read_version_attributes() {
-  version_fields=$(printf '%s\n' "$1" | jq -r '
-    (.state // ""), (.algorithm // ""), (.protectionLevel // ""), "end"') ||
-    die 1 "cannot parse cryptoKeyVersion JSON"
-  {
-    read -r version_state
-    read -r version_algorithm
-    read -r version_protection
-  } <<EOT
-$version_fields
-EOT
-  [ "$version_algorithm" = "$KEY_ALGORITHM_API" ] &&
-    [ "$version_protection" = "$KEY_PROTECTION_API" ]
-}
-
 # Sets recorded_version, recorded_address, recorded_sha from record/keeper.json.
-# Dies 18 unless the file is one JSON object with single-line string fields.
 read_record() {
   record_file=$RECORD_DIR/keeper.json
-  [ -f "$record_file" ] || die "$EXIT_RECORD" "$record_file missing; run address.sh"
-  record_fields=$(jq -r -s '
-    def field: (. // "") | if type != "string" or test("\\p{Cc}") then error("bad field") else . end;
-    if length != 1 then error("not exactly one JSON document")
-    elif (.[0] | type) != "object" then error("not a JSON object")
-    else .[0] | (.version | field), (.address | field), (.pemSha256 | field), "end" end' \
-    "$record_file" 2>/dev/null) ||
-    die "$EXIT_RECORD" "$record_file is not a single JSON object with string fields"
-  {
-    read -r recorded_version
-    read -r recorded_address
-    read -r recorded_sha
-  } <<EOT
-$record_fields
-EOT
+  [ -f "$record_file" ] || die "$record_file missing; run address.sh"
+  jq -e 'type == "object"' "$record_file" >/dev/null 2>&1 || die "$record_file is not a JSON object"
+  recorded_version=$(jq -r '.version // ""' "$record_file")
+  recorded_address=$(jq -r '.address // ""' "$record_file")
+  recorded_sha=$(jq -r '.pemSha256 // ""' "$record_file")
 }
 
 # Filtered lists: absence is an empty result, not an error to parse.
@@ -217,10 +145,15 @@ org_policy_enforced() {
   [ "$(printf '%s\n' "$org_policy_json" | jq -r '.booleanPolicy.enforced // false')" = "true" ]
 }
 
+# Sets version_state, version_algorithm, version_protection from live version 1.
 describe_version_1() {
   version_json=$(gcloud kms keys versions describe "$KEY_VERSION_NAME" --format=json)
-  read_version_attributes "$version_json" ||
-    die "$EXIT_KEY_ATTRIBUTES" "version 1 is algorithm=$version_algorithm protectionLevel=$version_protection"
+  version_state=$(printf '%s\n' "$version_json" | jq -r '.state // ""')
+  version_algorithm=$(printf '%s\n' "$version_json" | jq -r '.algorithm // ""')
+  version_protection=$(printf '%s\n' "$version_json" | jq -r '.protectionLevel // ""')
+  if [ "$version_algorithm" != "$KEY_ALGORITHM_API" ] || [ "$version_protection" != "$KEY_PROTECTION_API" ]; then
+    die "version 1 is algorithm=$version_algorithm protectionLevel=$version_protection"
+  fi
 }
 
 # Canonical policy: sorted bindings and audit configs, no etag or version. stdin -> stdout.
@@ -287,9 +220,9 @@ derive_address() {
   derive_hex=$(od -An -v -tx1 "$derive_der" | tr -d ' \n')
   case "$derive_hex" in
     "$SECP256K1_SPKI_PREFIX"*) ;;
-    *) die "$EXIT_KEY_ATTRIBUTES" "not an uncompressed secp256k1 SPKI" ;;
+    *) die "not an uncompressed secp256k1 SPKI" ;;
   esac
-  [ ${#derive_hex} -eq 176 ] || die "$EXIT_KEY_ATTRIBUTES" "unexpected DER length"
+  [ ${#derive_hex} -eq 176 ] || die "unexpected DER length"
   derive_xy=$(tail -c 64 "$derive_der" | od -An -v -tx1 | tr -d ' \n')
   derive_hash=$(cast keccak "0x$derive_xy")
   derive_lower=0x$(printf '%s' "$derive_hash" | tail -c 40)

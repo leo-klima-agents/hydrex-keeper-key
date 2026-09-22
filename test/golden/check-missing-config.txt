@@ -1,2 +1,2 @@
 gcloud version --format=json
-exit=2
+exit=1

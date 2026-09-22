@@ -9,10 +9,10 @@ require_tools
 load_config
 make_tmp
 
-[ -n "$KEEPER_SA" ] || die "$EXIT_CONFIG" "KEEPER_SA is empty"
+[ -n "$KEEPER_SA" ] || die "KEEPER_SA is empty"
 
 gcloud iam service-accounts describe "$KEEPER_SA" --project="$KEEPER_PROJECT" --format="value(email)" >/dev/null ||
-  die 1 "$KEEPER_SA not found in $KEEPER_PROJECT"
+  die "$KEEPER_SA not found in $KEEPER_PROJECT"
 
 key_policy=$(render_key_policy)
 set_iam_authoritative "$KEY_NAME" "$key_policy" kms keys
