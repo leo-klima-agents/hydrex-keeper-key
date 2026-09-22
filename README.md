@@ -20,7 +20,7 @@ Two GCP projects. The key project holds one key ring and one key, administered b
 cp config.env.example config.env
 ```
 
-Fill in every value. Leave `KEEPER_SA` empty until part three has created the job's service account.
+Fill in every value. Leave `KEEPER_SA`, the keeper job's service account (SA) email, empty until part three has created that account.
 
 Location defaults to `us`. One signature a week makes latency irrelevant; multi-region gives availability. Changing it later changes the resource names and the record, so choose once.
 
