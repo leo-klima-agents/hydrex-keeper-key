@@ -30,7 +30,7 @@ Location defaults to `us`. One signature a week makes latency irrelevant; multi-
 sh/setup.sh
 ```
 
-Enables KMS, creates the key ring and the key (asymmetric signing, secp256k1, HSM, 120-day destroy window), writes the key IAM policy, turns on KMS Data Access audit logs, and enforces `iam.disableServiceAccountKeyCreation` on the project. Safe to re-run; a second run changes nothing. An existing key with different attributes is refused.
+Enables the KMS and Org Policy APIs, creates the key ring and the key (asymmetric signing, secp256k1, HSM, 120-day destroy window), writes the key IAM policy, turns on KMS Data Access audit logs, and enforces `iam.disableServiceAccountKeyCreation` on the project. Safe to re-run; a second run changes nothing. An existing key with different attributes is refused.
 
 Confirm in the console: one ring, one key, one version, HSM, secp256k1, 120 days, only the admin group on the key, all three KMS audit log types on.
 
@@ -71,7 +71,14 @@ Safe to re-run.
 sh/check.sh
 ```
 
-Read-only. Fails if the live key no longer derives to the recorded address, a second version exists, version 1 is not enabled, key attributes or destroy window changed, the key IAM policy differs from the template, the audit config or org policy is off. Run it after each step above and on a schedule of your choosing. After step 5, `KEEPER_SA` must be set in `config.env` or the grant reads as drift.
+Read-only. Fails if the live key no longer derives to the recorded address, a second version exists, version 1 is not enabled, key attributes or destroy window changed, the key IAM policy differs from the template, the audit config or org policy is off. Run it after each step above. After step 5, `KEEPER_SA` must be set in `config.env` or the grant reads as drift.
+
+CI runs it every Friday after the vote, and on demand from the Actions tab. One-time setup, done once by an admin:
+
+1. In the key project, create a service account for CI, say `ci-check@KEY_PROJECT.iam.gserviceaccount.com`. Grant it `roles/cloudkms.viewer` on the key ring, and `roles/iam.securityReviewer` and `roles/orgpolicy.policyViewer` on the project. It can read everything `check.sh` needs and write nothing.
+2. Create a Workload Identity Federation pool and an OIDC provider for GitHub (`--issuer-uri=https://token.actions.githubusercontent.com`, attribute mapping `google.subject=assertion.sub,attribute.repository=assertion.repository`, attribute condition restricting `assertion.repository` to this repo). Grant the pool's principal set for this repo `roles/iam.workloadIdentityUser` on the CI service account.
+3. Set repository variables (Settings, Secrets and variables, Actions, Variables): `KEY_PROJECT`, `KEEPER_PROJECT`, `LOCATION`, `ADMIN_GROUP`, `KEEPER_SA` (empty until step 5), `WIF_PROVIDER` (the provider's full resource name) and `CI_SERVICE_ACCOUNT`. These are public material, not secrets.
+4. Run the workflow once by hand and confirm the `check` job is green.
 
 ## Outside the scripts
 
@@ -82,4 +89,4 @@ Read-only. Fails if the live key no longer derives to the recorded address, a se
 
 ## Development
 
-`test/run.sh` runs every script under `dash` against a fake `gcloud` and diffs the calls against `test/golden/`; `--update` regenerates after an intended change. CI runs lint and these tests. Nothing in CI touches GCP.
+`test/run.sh` runs every script under `dash` against a fake `gcloud` and diffs the calls against `test/golden/`; `--update` regenerates after an intended change. CI runs `shellcheck -s sh`, `sh -n`, `reuse lint` and these tests on every push; the `dash` run catches bashisms. CI reads, never writes: the scheduled `check` job is the only one with GCP access, through a viewer-only service account. Actions are pinned by commit and updated by Dependabot.
