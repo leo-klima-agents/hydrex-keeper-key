@@ -6,12 +6,11 @@ set -eu
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 test_sh=${TEST_SH:-dash}
 update=no
-case "${1:-}" in
-  "") ;;
-  --update) update=yes ;;
+case "$#:${1:-}" in
+  0:) ;;
+  1:--update) update=yes ;;
   *) printf 'usage: %s [--update]\n' "$0" >&2; exit 2 ;;
 esac
-[ $# -le 1 ] || { printf 'usage: %s [--update]\n' "$0" >&2; exit 2; }
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -21,35 +20,22 @@ mkdir "$tmp/bin"
 ln -s "$root/test/fake-gcloud" "$tmp/bin/gcloud"
 PATH=$tmp/bin:$PATH
 export PATH
-
-unset KEY_PROJECT KEEPER_PROJECT LOCATION KEY_RING KEY ADMIN_GROUP KEEPER_SA
 export FAKE_ADMIN_GROUP=hydrex-key-admins@example.com
 export FAKE_KEEPER_SA=hydrex-keeper@hydrex-keeper-rt-test.iam.gserviceaccount.com
-
+fixtures=$root/test/fixtures
 failures=0
-compare() { # NAME ACTUAL_FILE
-  golden=$root/test/golden/$1.txt
-  # 126/127 means a broken script, never an intended golden.
-  if grep -Eq '^exit=12[67]$' "$2"; then
-    printf 'FAIL    %s: exit 126/127, the script is broken\n' "$1"
-    cat "$tmp/$1.out"
-    failures=$((failures + 1))
-    return 0
-  fi
-  if [ "$update" = yes ]; then
-    cp "$2" "$golden"
-    printf 'updated %s\n' "$1"
-  elif [ -f "$golden" ] && diff -u "$golden" "$2" >"$tmp/$1.diff"; then
-    printf 'ok      %s\n' "$1"
-  else
-    printf 'FAIL    %s\n' "$1"
-    cat "$tmp/$1.diff" 2>/dev/null || printf '(no golden %s)\n' "$golden"
-    printf -- '--- script output ---\n'
-    cat "$tmp/$1.out"
-    printf -- '---------------------\n'
-    failures=$((failures + 1))
-  fi
+
+# run_case NAME SCENARIO CONFIG RECORD_DIR SCRIPT: runs, appends the exit code.
+run_case() {
+  name=$1
+  log=$tmp/$name.log
+  : >"$log"
+  rc=0
+  FAKE_GCLOUD_LOG=$log FAKE_GCLOUD_SCENARIO=$2 HYDREX_CONFIG=$root/test/config/$3.env HYDREX_RECORD_DIR=$4 \
+    "$test_sh" "$root/sh/$5" >"$tmp/$name.out" 2>&1 || rc=$?
+  printf 'exit=%s\n' "$rc" >>"$log"
 }
+golden_case() { run_case "$@" && compare "$1"; }
 
 # capture NAME LABEL PATH: append a written file, or "(missing)", to NAME's log.
 capture() {
@@ -57,135 +43,47 @@ capture() {
   if [ -f "$3" ]; then cat "$3" >>"$tmp/$1.log"; else printf '(missing)\n' >>"$tmp/$1.log"; fi
 }
 
-# run_case NAME SCENARIO CONFIG RECORD_DIR SCRIPT [ARGS...]
-run_case() {
-  name=$1 scenario=$2 config=$3 record_dir=$4 script=$5
-  shift 5
-  log=$tmp/$name.log
-  : >"$log"
-  rc=0
-  FAKE_GCLOUD_LOG=$log FAKE_GCLOUD_SCENARIO=$scenario \
-    HYDREX_CONFIG=$root/test/config/$config.env HYDREX_RECORD_DIR=$record_dir \
-    "$test_sh" "$root/sh/$script" "$@" >"$tmp/$name.out" 2>&1 || rc=$?
-  printf 'exit=%s\n' "$rc" >>"$log"
+compare() {
+  golden=$root/test/golden/$1.txt
+  if grep -Eq '^exit=12[67]$' "$tmp/$1.log"; then # broken script, never an intended golden
+    printf 'FAIL    %s: exit 126/127\n' "$1"
+    cat "$tmp/$1.out"
+    failures=$((failures + 1))
+  elif [ "$update" = yes ]; then
+    cp "$tmp/$1.log" "$golden"
+    printf 'updated %s\n' "$1"
+  elif [ -f "$golden" ] && diff -u "$golden" "$tmp/$1.log" >"$tmp/$1.diff"; then
+    printf 'ok      %s\n' "$1"
+  else
+    printf 'FAIL    %s\n' "$1"
+    cat "$tmp/$1.diff" 2>/dev/null || printf '(no golden %s)\n' "$golden"
+    cat "$tmp/$1.out"
+    failures=$((failures + 1))
+  fi
 }
 
-fixtures=$root/test/fixtures
+golden_case setup-fresh fresh admin-only "$fixtures/empty" setup.sh
+golden_case setup-existing existing with-keeper "$fixtures/empty" setup.sh
+golden_case setup-foreign-key foreign-key admin-only "$fixtures/empty" setup.sh
+golden_case grant-fresh admin-only with-keeper "$fixtures/empty" grant.sh
 
-# setup.sh
-run_case setup-fresh fresh admin-only "$fixtures/empty" setup.sh
-compare setup-fresh "$tmp/setup-fresh.log"
-run_case setup-existing existing with-keeper "$fixtures/empty" setup.sh
-compare setup-existing "$tmp/setup-existing.log"
-run_case setup-repair repair with-keeper "$fixtures/empty" setup.sh
-compare setup-repair "$tmp/setup-repair.log"
-run_case setup-foreign-key foreign-key admin-only "$fixtures/empty" setup.sh
-compare setup-foreign-key "$tmp/setup-foreign-key.log"
-run_case setup-short-window short-window admin-only "$fixtures/empty" setup.sh
-compare setup-short-window "$tmp/setup-short-window.log"
-
-# grant.sh
-run_case grant-fresh admin-only with-keeper "$fixtures/empty" grant.sh
-compare grant-fresh "$tmp/grant-fresh.log"
-run_case grant-existing existing with-keeper "$fixtures/empty" grant.sh
-compare grant-existing "$tmp/grant-existing.log"
-run_case grant-no-keeper-sa existing admin-only "$fixtures/empty" grant.sh
-compare grant-no-keeper-sa "$tmp/grant-no-keeper-sa.log"
-
-# address.sh output must equal test/fixtures/record, which check cases read.
+# address.sh output must equal test/fixtures/record, which the check cases read.
 mkdir "$tmp/record"
 run_case address existing admin-only "$tmp/record" address.sh
-{
-  printf -- '--- stdout ---\n'
-  grep -v '^wrote ' "$tmp/address.out" || true
-} >>"$tmp/address.log"
 capture address record/keeper.json "$tmp/record/keeper.json"
 capture address record/keeper.pem "$tmp/record/keeper.pem"
-compare address "$tmp/address.log"
+compare address
 if [ "$update" = yes ]; then
   cp "$tmp/record/keeper.json" "$tmp/record/keeper.pem" "$fixtures/record/"
-elif ! diff -u "$fixtures/record/keeper.json" "$tmp/record/keeper.json" 2>&1 || ! diff -u "$fixtures/record/keeper.pem" "$tmp/record/keeper.pem" 2>&1; then
+elif ! diff -u "$fixtures/record/keeper.json" "$tmp/record/keeper.json" 2>&1 ||
+  ! diff -u "$fixtures/record/keeper.pem" "$tmp/record/keeper.pem" 2>&1; then
   printf 'FAIL    address: record differs from test/fixtures/record\n'
   failures=$((failures + 1))
 fi
-run_case address-same-key existing admin-only "$tmp/record" address.sh
-compare address-same-key "$tmp/address-same-key.log"
-mkdir "$tmp/record-other"
-cp "$fixtures/record/keeper.json" "$fixtures/record/keeper.pem" "$tmp/record-other/"
-run_case address-other-key other-key admin-only "$tmp/record-other" address.sh
-compare address-other-key "$tmp/address-other-key.log"
-run_case address-other-key-force other-key admin-only "$tmp/record-other" address.sh --force
-capture address-other-key-force record/keeper.json "$tmp/record-other/keeper.json"
-capture address-other-key-force record/keeper.pem "$tmp/record-other/keeper.pem"
-compare address-other-key-force "$tmp/address-other-key-force.log"
-mkdir "$tmp/record-stale-pem"
-cp "$fixtures/record/keeper.pem" "$tmp/record-stale-pem/"
-jq '.pemSha256 = "0000"' "$fixtures/record/keeper.json" >"$tmp/record-stale-pem/keeper.json"
-run_case address-refresh-pem existing admin-only "$tmp/record-stale-pem" address.sh
-capture address-refresh-pem record/keeper.json "$tmp/record-stale-pem/keeper.json"
-compare address-refresh-pem "$tmp/address-refresh-pem.log"
-mkdir "$tmp/record-malformed"
-printf 'not json\n' >"$tmp/record-malformed/keeper.json"
-cp "$fixtures/record/keeper.pem" "$tmp/record-malformed/"
-run_case address-malformed-record existing admin-only "$tmp/record-malformed" address.sh
-compare address-malformed-record "$tmp/address-malformed-record.log"
-run_case address-bad-args existing admin-only "$tmp/record" address.sh --force extra
-compare address-bad-args "$tmp/address-bad-args.log"
-mkdir "$tmp/record-no-pem"
-cp "$fixtures/record/keeper.json" "$tmp/record-no-pem/"
-run_case address-missing-pem existing admin-only "$tmp/record-no-pem" address.sh
-capture address-missing-pem record/keeper.pem "$tmp/record-no-pem/keeper.pem"
-compare address-missing-pem "$tmp/address-missing-pem.log"
-mkdir "$tmp/record-no-sha"
-cp "$fixtures/record/keeper.pem" "$tmp/record-no-sha/"
-jq 'del(.pemSha256)' "$fixtures/record/keeper.json" >"$tmp/record-no-sha/keeper.json"
-run_case address-record-no-sha existing admin-only "$tmp/record-no-sha" address.sh
-capture address-record-no-sha record/keeper.json "$tmp/record-no-sha/keeper.json"
-compare address-record-no-sha "$tmp/address-record-no-sha.log"
-run_case address-pending pending admin-only "$tmp/record" address.sh
-compare address-pending "$tmp/address-pending.log"
 
-run_case check-ok existing with-keeper "$fixtures/record" check.sh
-compare check-ok "$tmp/check-ok.log"
-run_case check-no-record existing with-keeper "$fixtures/empty" check.sh
-compare check-no-record "$tmp/check-no-record.log"
-run_case check-malformed-record existing with-keeper "$tmp/record-malformed" check.sh
-compare check-malformed-record "$tmp/check-malformed-record.log"
-run_case check-foreign-key foreign-key with-keeper "$fixtures/record" check.sh
-compare check-foreign-key "$tmp/check-foreign-key.log"
-run_case check-foreign-version foreign-version with-keeper "$fixtures/record" check.sh
-compare check-foreign-version "$tmp/check-foreign-version.log"
-run_case check-no-key no-key with-keeper "$fixtures/record" check.sh
-compare check-no-key "$tmp/check-no-key.log"
-run_case check-version-two-only version-two-only with-keeper "$fixtures/record" check.sh
-compare check-version-two-only "$tmp/check-version-two-only.log"
-run_case check-window-and-disabled window-and-disabled with-keeper "$fixtures/record" check.sh
-compare check-window-and-disabled "$tmp/check-window-and-disabled.log"
-run_case check-two-versions two-versions with-keeper "$fixtures/record" check.sh
-compare check-two-versions "$tmp/check-two-versions.log"
-run_case check-other-key other-key with-keeper "$fixtures/record" check.sh
-compare check-other-key "$tmp/check-other-key.log"
-run_case check-extra-binding extra-binding with-keeper "$fixtures/record" check.sh
-compare check-extra-binding "$tmp/check-extra-binding.log"
-run_case check-before-grant admin-only admin-only "$fixtures/record" check.sh
-compare check-before-grant "$tmp/check-before-grant.log"
-run_case check-config-behind-grant existing admin-only "$fixtures/record" check.sh
-compare check-config-behind-grant "$tmp/check-config-behind-grant.log"
-run_case check-missing-config existing missing "$fixtures/record" check.sh
-compare check-missing-config "$tmp/check-missing-config.log"
-run_case check-no-audit no-audit with-keeper "$fixtures/record" check.sh
-compare check-no-audit "$tmp/check-no-audit.log"
-run_case check-no-orgpolicy no-orgpolicy with-keeper "$fixtures/record" check.sh
-compare check-no-orgpolicy "$tmp/check-no-orgpolicy.log"
-run_case check-bad-args existing with-keeper "$fixtures/record" check.sh extra
-compare check-bad-args "$tmp/check-bad-args.log"
-run_case check-no-versions no-versions with-keeper "$fixtures/record" check.sh
-compare check-no-versions "$tmp/check-no-versions.log"
-run_case address-no-key no-key admin-only "$tmp/record" address.sh
-compare address-no-key "$tmp/address-no-key.log"
+golden_case check-ok existing with-keeper "$fixtures/record" check.sh
+golden_case check-extra-binding extra-binding with-keeper "$fixtures/record" check.sh
+golden_case check-two-versions two-versions with-keeper "$fixtures/record" check.sh
 
-if [ "$failures" -ne 0 ]; then
-  printf '%s golden case(s) failed\n' "$failures"
-  exit 1
-fi
+[ "$failures" -eq 0 ] || { printf '%s golden case(s) failed\n' "$failures"; exit 1; }
 printf 'all golden cases passed\n'

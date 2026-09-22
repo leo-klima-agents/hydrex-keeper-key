@@ -33,42 +33,18 @@ make_tmp() {
   trap 'exit 143' TERM
 }
 
-require_tool() {
-  command -v "$1" >/dev/null 2>&1 || die "$1 not found on PATH$2"
-}
-
-# version_ge HAVE MIN. First three components only.
+# version_ge HAVE MIN, dotted numeric versions.
 version_ge() {
-  case "$1$2" in "" | *[!0-9.]*) return 1 ;; esac
-  IFS=. read -r have_1 have_2 have_3 have_rest <<EOT
-$1
-EOT
-  IFS=. read -r min_1 min_2 min_3 min_rest <<EOT
-$2
-EOT
-  : "$have_rest" "$min_rest"
-  have_1=${have_1:-0} have_2=${have_2:-0} have_3=${have_3:-0}
-  min_1=${min_1:-0} min_2=${min_2:-0} min_3=${min_3:-0}
-  [ "$have_1" -gt "$min_1" ] && return 0
-  [ "$have_1" -lt "$min_1" ] && return 1
-  [ "$have_2" -gt "$min_2" ] && return 0
-  [ "$have_2" -lt "$min_2" ] && return 1
-  [ "$have_3" -ge "$min_3" ]
+  [ "$(printf '%s\n%s\n' "$1" "$2" | sort -t. -k1,1n -k2,2n -k3,3n | head -n 1)" = "$2" ]
 }
 
 # require_tools [EXTRA...]: gcloud and jq, plus any named extras.
 # shellcheck disable=SC2120
 require_tools() {
-  require_tool gcloud " (https://cloud.google.com/sdk/docs/install)"
-  require_tool jq ""
-  for extra_tool in "$@"; do
-    case "$extra_tool" in
-      cast) require_tool cast " (Foundry: https://getfoundry.sh)" ;;
-      *) require_tool "$extra_tool" "" ;;
-    esac
+  for tool in gcloud jq "$@"; do
+    command -v "$tool" >/dev/null 2>&1 || die "$tool not found on PATH"
   done
-  gcloud_version_json=$(gcloud version --format=json)
-  gcloud_version=$(printf '%s\n' "$gcloud_version_json" | jq -r '."Google Cloud SDK" // ""')
+  gcloud_version=$(gcloud version --format=json | jq -r '."Google Cloud SDK" // ""')
   case "$gcloud_version" in
     "" | *[!0-9.]*) die "cannot parse gcloud version '$gcloud_version'" ;;
   esac
