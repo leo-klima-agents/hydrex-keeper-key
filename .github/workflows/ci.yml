@@ -48,12 +48,18 @@ jobs:
         with:
           version: v1.8.3
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends jq openssl
-      - run: |
+      - env:
+          KEY_PROJECT: ${{ vars.KEY_PROJECT }}
+          KEEPER_PROJECT: ${{ vars.KEEPER_PROJECT }}
+          LOCATION: ${{ vars.LOCATION }}
+          ADMIN_GROUP: ${{ vars.ADMIN_GROUP }}
+          KEEPER_SA: ${{ vars.KEEPER_SA }}
+        run: |
           cat >config.env <<CFG
-          KEY_PROJECT=${{ vars.KEY_PROJECT }}
-          KEEPER_PROJECT=${{ vars.KEEPER_PROJECT }}
-          LOCATION=${{ vars.LOCATION }}
-          ADMIN_GROUP=${{ vars.ADMIN_GROUP }}
-          KEEPER_SA=${{ vars.KEEPER_SA }}
+          KEY_PROJECT='$KEY_PROJECT'
+          KEEPER_PROJECT='$KEEPER_PROJECT'
+          LOCATION='$LOCATION'
+          ADMIN_GROUP='$ADMIN_GROUP'
+          KEEPER_SA='$KEEPER_SA'
           CFG
       - run: sh/check.sh
