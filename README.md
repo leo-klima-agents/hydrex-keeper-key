@@ -39,7 +39,7 @@ test/fake-gcloud, test/run.sh, test/golden/
 | `setup.sh` step 6 | org or folder | `roles/orgpolicy.policyAdmin`; optional, warns without it |
 | `address.sh` | key | `roles/cloudkms.admin` via the admin group |
 | `grant.sh` | key, keeper project | admin group; `roles/iam.serviceAccountViewer` on the keeper project |
-| `check.sh` | key project | `roles/viewer` and `roles/cloudkms.publicKeyViewer` |
+| `check.sh` | key project | the admin group, or `roles/viewer` plus `roles/cloudkms.publicKeyViewer` granted at project level (the key's own policy is the template and would drop it) |
 
 ## 2. config.env
 

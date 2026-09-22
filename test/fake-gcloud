@@ -7,7 +7,7 @@ set -eu
 : "${FAKE_GCLOUD_LOG:?}" "${FAKE_GCLOUD_SCENARIO:?}" "${FAKE_ADMIN_GROUP:?}" "${FAKE_KEEPER_SA:?}"
 
 api_enabled=yes ring_exists=yes key_exists=yes key_policy=full project_audit=yes
-orgpolicy=enforced versions=one version_state=ENABLED
+orgpolicy=enforced versions=one version_state=ENABLED warn=no
 case "$FAKE_GCLOUD_SCENARIO" in
   fresh) api_enabled=no ring_exists=no key_exists=no key_policy=none project_audit=no
     orgpolicy=unset version_state=PENDING_GENERATION ;;
@@ -16,6 +16,7 @@ case "$FAKE_GCLOUD_SCENARIO" in
   admin-only) key_policy='admin' ;;
   extra-binding) key_policy=extra ;;
   two-versions) versions=two ;;
+  warn) orgpolicy=unset warn=yes ;; # not enforced, and gcloud chatters on stderr
   *) printf 'fake-gcloud: unknown scenario %s\n' "$FAKE_GCLOUD_SCENARIO" >&2; exit 98 ;;
 esac
 
@@ -77,7 +78,10 @@ for arg in "$@"; do
   esac
 done
 
-log_call() { printf 'gcloud %s\n' "$*" >>"$FAKE_GCLOUD_LOG"; }
+log_call() {
+  printf 'gcloud %s\n' "$*" >>"$FAKE_GCLOUD_LOG"
+  [ "$warn" = no ] || printf 'WARNING: Updates are available for some Google Cloud CLI components.\n' >&2
+}
 
 # Requires the etag the fake handed out; logs canonical JSON in place of the path.
 log_set_policy() { # EXPECTED_ETAG ARGS...
