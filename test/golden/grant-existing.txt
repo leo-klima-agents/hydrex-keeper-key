@@ -1,4 +1,0 @@
-gcloud version --format=json
-gcloud iam service-accounts describe hydrex-keeper@hydrex-keeper-rt-test.iam.gserviceaccount.com --project=hydrex-keeper-rt-test --format=value(email)
-gcloud kms keys get-iam-policy projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/keeper --format=json
-exit=0
