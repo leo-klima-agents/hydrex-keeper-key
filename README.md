@@ -31,7 +31,7 @@ test/fake-gcloud, test/run.sh, test/golden/
 
 ## 1. Prerequisites
 
-`gcloud` >= 470.0.0 and `jq`. `openssl` and `cast` ([Foundry](https://getfoundry.sh)) for `address.sh` and `check.sh`. Any POSIX `sh`; CI uses `dash`.
+`gcloud` >= 470.0.0 and `jq`. `openssl` and `cast` ([Foundry](https://getfoundry.sh)) for `address.sh` and `check.sh`. Any POSIX `sh` with `awk`, `od`, `tail` and `tr`; CI uses `dash`.
 
 | Script | Where | Role |
 |---|---|---|

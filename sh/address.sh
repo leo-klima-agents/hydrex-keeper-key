@@ -42,8 +42,7 @@ if [ -f "$RECORD_DIR/keeper.json" ] && [ "$force" = no ]; then
   log "refreshing keeper.pem and pemSha256"
 fi
 
-# Staged beside the record (same filesystem) and renamed, JSON last, so an
-# interrupt cannot truncate either file.
+# Staged next to the record so the rename stays on one filesystem. JSON last.
 mkdir -p "$RECORD_DIR"
 jq -n \
   --arg key "$KEY_NAME" \
