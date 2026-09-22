@@ -9,15 +9,17 @@ require_tools
 load_config
 make_tmp
 
-log "== 1/7 API"
-enabled=$(gcloud services list --enabled --project="$KEY_PROJECT" \
-  --filter="config.name=$KMS_SERVICE" --format="value(config.name)")
-if [ "$enabled" = "$KMS_SERVICE" ]; then
-  log "$KMS_SERVICE enabled"
-else
-  log "enabling $KMS_SERVICE"
-  gcloud services enable "$KMS_SERVICE" --project="$KEY_PROJECT"
-fi
+log "== 1/7 APIs"
+for service in $SERVICES; do
+  enabled=$(gcloud services list --enabled --project="$KEY_PROJECT" \
+    --filter="config.name=$service" --format="value(config.name)")
+  if [ "$enabled" = "$service" ]; then
+    log "$service enabled"
+  else
+    log "enabling $service"
+    gcloud services enable "$service" --project="$KEY_PROJECT"
+  fi
+done
 
 log "== 2/7 key ring"
 ring=$(find_keyring)
@@ -63,7 +65,8 @@ org_policy_enforced && org_status=0 || org_status=$?
 case "$org_status" in
   0) log "$SA_KEY_CONSTRAINT enforced" ;;
   2) log "WARNING: cannot read $SA_KEY_CONSTRAINT; not setting it" ;;
-  *) if gcloud resource-manager org-policies enable-enforce "$SA_KEY_CONSTRAINT" --project="$KEY_PROJECT" >/dev/null; then
+  *) sed "s|\${KEY_PROJECT}|$KEY_PROJECT|" "$POLICY_DIR/org-policy.yaml" >"$TMP/org-policy.yaml"
+     if gcloud org-policies set-policy "$TMP/org-policy.yaml" >/dev/null; then
        log "$SA_KEY_CONSTRAINT now enforced"
      else
        log "WARNING: cannot enforce $SA_KEY_CONSTRAINT (needs orgpolicy.policy.set)"

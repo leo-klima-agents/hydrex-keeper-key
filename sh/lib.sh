@@ -3,6 +3,7 @@
 # shellcheck disable=SC2034
 
 MIN_GCLOUD_VERSION=470.0.0
+SERVICES="cloudkms.googleapis.com orgpolicy.googleapis.com"
 KMS_SERVICE=cloudkms.googleapis.com
 KEY_PURPOSE=asymmetric-signing
 KEY_PURPOSE_API=ASYMMETRIC_SIGN
@@ -147,9 +148,9 @@ find_key() {
 
 # 0 enforced, 1 not enforced, 2 could not read.
 org_policy_enforced() {
-  org_policy_json=$(gcloud resource-manager org-policies describe "$SA_KEY_CONSTRAINT" \
+  org_policy_json=$(gcloud org-policies describe "$SA_KEY_CONSTRAINT" \
     --project="$KEY_PROJECT" --effective --format=json) || return 2
-  [ "$(printf '%s\n' "$org_policy_json" | jq -r '.booleanPolicy.enforced // false')" = "true" ]
+  [ "$(printf '%s\n' "$org_policy_json" | jq -r '[.spec.rules[]?.enforce] | any')" = "true" ]
 }
 
 describe_version_1() {
