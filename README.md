@@ -1,8 +1,8 @@
 # hydrex-keeper-key
 
-Creates the keeper's signing key in Cloud KMS, records its Ethereum address for `hydrex-conduit-executor` (part one), grants the keeper service (part three) the right to sign with it, and checks that nothing has drifted. The private key never leaves the HSM; this repo holds only public material.
+The Hydrex keeper is a service that casts one on-chain vote a week through `hydrex-conduit-executor`, a Safe module that accepts transactions from a single fixed Ethereum address, its `KEEPER`. This repo creates the key behind that address in Google Cloud KMS, records the address so the module can be deployed with it, grants the keeper service the right to sign with the key, and checks that nothing has drifted since. The private key never leaves the HSM; this repo holds only public material.
 
-Two GCP projects. The key project holds one key ring and one key, administered by a small human group. The keeper project holds the runtime and receives one grant: signer on the key. IAM on the key is always written in full from `policy/key.iam.json.tmpl`; nothing is ever added to what is there.
+Two GCP projects. The key project holds one key ring and one key, administered by a small human group. The keeper project holds the keeper service, a Cloud Run job, and receives one grant: signer on the key. IAM on the key is always written in full from `policy/key.iam.json.tmpl`; nothing is ever added to what is there.
 
 ## Prerequisites
 
@@ -20,7 +20,7 @@ Two GCP projects. The key project holds one key ring and one key, administered b
 cp config.env.example config.env
 ```
 
-Fill in every value. Leave `KEEPER_SA`, the keeper job's service account (SA) email, empty until part three has created that account.
+Fill in every value. Leave `KEEPER_SA`, the keeper service's service account (SA) email, empty until that account exists in the keeper project.
 
 Location defaults to `us`. One signature a week makes latency irrelevant; multi-region gives availability. Changing it later changes the resource names and the record, so choose once.
 
@@ -51,13 +51,13 @@ XY=$(tail -c 64 keeper.der | od -An -v -tx1 | tr -d ' \n')
 cast to-check-sum-address "0x$(cast keccak "0x$XY" | tr -d '\n' | tail -c 40)"
 ```
 
-## 4. Deploy part one
+## 4. Deploy the module
 
-`address` in `record/keeper.json` is `KEEPER`. It is immutable in the module, so a new key means a new module. Have part one read the address from a copy of `record/keeper.json` rather than paste it.
+`address` in `record/keeper.json` is the `KEEPER` of `hydrex-conduit-executor`. It is immutable in the module, so a new key means a new module. Have the module's deploy script read the address from a copy of `record/keeper.json` rather than paste it.
 
 ## 5. Grant the keeper
 
-Once part three has created the job's service account, set `KEEPER_SA` in `config.env` and run:
+Once the keeper service's service account exists, set `KEEPER_SA` in `config.env` and run:
 
 ```sh
 sh/grant.sh
