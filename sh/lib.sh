@@ -13,7 +13,7 @@ KEY_PROTECTION=hsm
 KEY_PROTECTION_API=HSM
 DESTROY_WINDOW=120d          # API maximum; immutable after create
 DESTROY_WINDOW_API=10368000s # 120 days in seconds
-SA_KEY_CONSTRAINT=iam.disableServiceAccountKeyCreation
+SA_KEY_CONSTRAINT=iam.managed.disableServiceAccountKeyCreation
 
 REPO_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 POLICY_DIR=$REPO_ROOT/policy

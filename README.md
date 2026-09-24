@@ -30,7 +30,7 @@ Location defaults to `us`. One signature a week makes latency irrelevant; multi-
 sh/setup.sh
 ```
 
-Enables the KMS and Org Policy APIs, creates the key ring and the key (asymmetric signing, secp256k1, HSM, 120-day destroy window), writes the key IAM policy, turns on KMS Data Access audit logs, and enforces `iam.disableServiceAccountKeyCreation` on the project. Safe to re-run; a second run changes nothing. An existing key with different attributes is refused.
+Enables the KMS and Org Policy APIs, creates the key ring and the key (asymmetric signing, secp256k1, HSM, 120-day destroy window), writes the key IAM policy, turns on KMS Data Access audit logs, and enforces `iam.managed.disableServiceAccountKeyCreation` on the project. Safe to re-run; a second run changes nothing. An existing key with different attributes is refused.
 
 Confirm in the console: one ring, one key, one version, HSM, secp256k1, 120 days, only the admin group on the key, all three KMS audit log types on.
 
