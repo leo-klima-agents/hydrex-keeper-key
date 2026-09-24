@@ -49,7 +49,7 @@ else
 fi
 
 log "== 4/7 key IAM"
-[ -n "$KEEPER_SA" ] || log "KEEPER_SA empty: admin group only"
+[ -n "$KEEPER_SA" ] || log "KEEPER_SA empty: admin only"
 key_policy=$(render_key_policy)
 set_iam_authoritative "$KEY_NAME" "$key_policy" kms keys
 

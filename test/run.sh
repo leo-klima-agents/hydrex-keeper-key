@@ -20,7 +20,7 @@ mkdir "$tmp/bin"
 ln -s "$root/test/fake-gcloud" "$tmp/bin/gcloud"
 PATH=$tmp/bin:$PATH
 export PATH
-export FAKE_ADMIN_GROUP=hydrex-key-admins@example.com
+export FAKE_ADMIN_MEMBER=user:hydrex-key-admin@example.com
 export FAKE_KEEPER_SA=hydrex-keeper@hydrex-keeper-rt-test.iam.gserviceaccount.com
 fixtures=$root/test/fixtures
 failures=0

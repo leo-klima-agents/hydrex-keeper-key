@@ -59,7 +59,7 @@ require_tools() {
 load_config() {
   [ -f "$CONFIG_FILE" ] || die "$CONFIG_FILE missing; copy config.env.example"
   case "$CONFIG_FILE" in */*) ;; *) CONFIG_FILE=./$CONFIG_FILE ;; esac # else `.` searches PATH
-  unset KEY_PROJECT KEEPER_PROJECT LOCATION KEY_RING KEY ADMIN_GROUP KEEPER_SA
+  unset KEY_PROJECT KEEPER_PROJECT LOCATION KEY_RING KEY ADMIN_MEMBER KEEPER_SA
   # shellcheck source=/dev/null
   . "$CONFIG_FILE"
   LOCATION=${LOCATION:-us}
@@ -67,15 +67,15 @@ load_config() {
   KEY=${KEY:-keeper}
   KEEPER_SA=${KEEPER_SA:-}
 
-  for required in KEY_PROJECT KEEPER_PROJECT ADMIN_GROUP; do
+  for required in KEY_PROJECT KEEPER_PROJECT ADMIN_MEMBER; do
     eval "value=\${$required:-}"
     [ -n "$value" ] || die "$required is not set in $CONFIG_FILE"
   done
   [ "$KEY_PROJECT" != "$KEEPER_PROJECT" ] ||
     die "KEY_PROJECT and KEEPER_PROJECT must differ"
-  case "$ADMIN_GROUP" in
-    *@*) ;;
-    *) die "ADMIN_GROUP must be an email address" ;;
+  case "$ADMIN_MEMBER" in
+    user:?*@?* | group:?*@?*) ;;
+    *) die "ADMIN_MEMBER must be user:EMAIL or group:EMAIL" ;;
   esac
   if [ -n "$KEEPER_SA" ]; then
     case "$KEEPER_SA" in
@@ -91,9 +91,9 @@ load_config() {
 
 # Renders policy/key.iam.json.tmpl. Bindings with an empty principal are dropped.
 render_key_policy() {
-  jq --arg admin "$ADMIN_GROUP" --arg keeper "$KEEPER_SA" '
+  jq --arg admin "$ADMIN_MEMBER" --arg keeper "$KEEPER_SA" '
     walk(if type == "string"
-         then (split("${ADMIN_GROUP}") | join($admin)) | (split("${KEEPER_SA}") | join($keeper))
+         then (split("${ADMIN_MEMBER}") | join($admin)) | (split("${KEEPER_SA}") | join($keeper))
          else . end)
     | .bindings |= map(.members |= map(select(endswith(":") | not)) | select(.members | length > 0))
   ' "$POLICY_DIR/key.iam.json.tmpl"

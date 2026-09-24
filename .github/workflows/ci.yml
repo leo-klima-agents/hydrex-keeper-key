@@ -54,7 +54,7 @@ jobs:
           LOCATION: ${{ vars.LOCATION }}
           KEY_RING: ${{ vars.KEY_RING }}
           KEY: ${{ vars.KEY }}
-          ADMIN_GROUP: ${{ vars.ADMIN_GROUP }}
+          ADMIN_MEMBER: ${{ vars.ADMIN_MEMBER }}
           KEEPER_SA: ${{ vars.KEEPER_SA }}
         run: |
           cat >config.env <<CFG
@@ -63,7 +63,7 @@ jobs:
           LOCATION='$LOCATION'
           KEY_RING='$KEY_RING'
           KEY='$KEY'
-          ADMIN_GROUP='$ADMIN_GROUP'
+          ADMIN_MEMBER='$ADMIN_MEMBER'
           KEEPER_SA='$KEEPER_SA'
           CFG
       - run: sh/check.sh

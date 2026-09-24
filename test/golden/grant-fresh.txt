@@ -1,5 +1,5 @@
 gcloud version --format=json
 gcloud iam service-accounts describe hydrex-keeper@hydrex-keeper-rt-test.iam.gserviceaccount.com --project=hydrex-keeper-rt-test --format=value(email)
 gcloud kms keys get-iam-policy projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/keeper --format=json
-gcloud kms keys set-iam-policy projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/keeper {"bindings":[{"members":["group:hydrex-key-admins@example.com"],"role":"roles/cloudkms.admin"},{"members":["serviceAccount:hydrex-keeper@hydrex-keeper-rt-test.iam.gserviceaccount.com"],"role":"roles/cloudkms.publicKeyViewer"},{"members":["serviceAccount:hydrex-keeper@hydrex-keeper-rt-test.iam.gserviceaccount.com"],"role":"roles/cloudkms.signer"}],"etag":"BwKeyAdmin"}
+gcloud kms keys set-iam-policy projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/keeper {"bindings":[{"members":["user:hydrex-key-admin@example.com"],"role":"roles/cloudkms.admin"},{"members":["serviceAccount:hydrex-keeper@hydrex-keeper-rt-test.iam.gserviceaccount.com"],"role":"roles/cloudkms.publicKeyViewer"},{"members":["serviceAccount:hydrex-keeper@hydrex-keeper-rt-test.iam.gserviceaccount.com"],"role":"roles/cloudkms.signer"}],"etag":"BwKeyAdmin"}
 exit=0

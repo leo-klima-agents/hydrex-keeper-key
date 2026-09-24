@@ -4,7 +4,7 @@
 # become <file> and set-iam-policy files become their canonical JSON.
 set -eu
 
-: "${FAKE_GCLOUD_LOG:?}" "${FAKE_GCLOUD_SCENARIO:?}" "${FAKE_ADMIN_GROUP:?}" "${FAKE_KEEPER_SA:?}"
+: "${FAKE_GCLOUD_LOG:?}" "${FAKE_GCLOUD_SCENARIO:?}" "${FAKE_ADMIN_MEMBER:?}" "${FAKE_KEEPER_SA:?}"
 
 api_enabled=yes ring_exists=yes key_exists=yes key_policy=full project_audit=yes
 orgpolicy=enforced versions=one version_state=ENABLED warn=no
@@ -44,7 +44,7 @@ version_json() { # NAME STATE
 }
 
 key_policy_json() {
-  admin="{\"role\":\"roles/cloudkms.admin\",\"members\":[\"group:$FAKE_ADMIN_GROUP\"]}"
+  admin="{\"role\":\"roles/cloudkms.admin\",\"members\":[\"$FAKE_ADMIN_MEMBER\"]}"
   viewer="{\"role\":\"roles/cloudkms.publicKeyViewer\",\"members\":[\"serviceAccount:$FAKE_KEEPER_SA\"]}"
   signer="{\"role\":\"roles/cloudkms.signer\",\"members\":[\"serviceAccount:$FAKE_KEEPER_SA\"]}"
   stray='{"role":"roles/cloudkms.viewer","members":["user:stray@example.com"]}'
@@ -57,7 +57,7 @@ key_policy_json() {
 }
 
 project_policy_json() {
-  bindings="[{\"role\":\"roles/owner\",\"members\":[\"group:$FAKE_ADMIN_GROUP\"]}]"
+  bindings="[{\"role\":\"roles/owner\",\"members\":[\"$FAKE_ADMIN_MEMBER\"]}]"
   other_audit='{"service":"allServices","auditLogConfigs":[{"logType":"ADMIN_READ"}]}'
   kms_audit='{"service":"cloudkms.googleapis.com","auditLogConfigs":[{"logType":"ADMIN_READ"},{"logType":"DATA_READ"},{"logType":"DATA_WRITE"}]}'
   case "$project_audit" in
