@@ -1,0 +1,22 @@
+{
+  "bindings": [
+    {
+      "role": "roles/cloudkms.admin",
+      "members": [
+        "${ADMIN_MEMBER}"
+      ]
+    },
+    {
+      "role": "roles/cloudkms.publicKeyViewer",
+      "members": [
+        "serviceAccount:${KEEPER_SA}"
+      ]
+    },
+    {
+      "role": "roles/cloudkms.signer",
+      "members": [
+        "serviceAccount:${KEEPER_SA}"
+      ]
+    }
+  ]
+}
