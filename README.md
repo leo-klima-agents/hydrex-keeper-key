@@ -77,7 +77,7 @@ CI runs it every Friday after the vote, and on demand from the Actions tab. One-
 
 1. In the key project, create a service account for CI, say `ci-check@KEY_PROJECT.iam.gserviceaccount.com`. Grant it `roles/cloudkms.viewer` on the key ring, and `roles/iam.securityReviewer` and `roles/orgpolicy.policyViewer` on the project. It can read everything `check.sh` needs and write nothing.
 2. Create a Workload Identity Federation pool and an OIDC provider for GitHub (`--issuer-uri=https://token.actions.githubusercontent.com`, attribute mapping `google.subject=assertion.sub,attribute.repository=assertion.repository`, attribute condition restricting `assertion.repository` to this repo). Grant the pool's principal set for this repo `roles/iam.workloadIdentityUser` on the CI service account.
-3. Set repository variables (Settings, Secrets and variables, Actions, Variables): `KEY_PROJECT`, `KEEPER_PROJECT`, `LOCATION`, `ADMIN_GROUP`, `KEEPER_SA` (empty until step 5), `WIF_PROVIDER` (the provider's full resource name) and `CI_SERVICE_ACCOUNT`. These are public material, not secrets.
+3. Set repository variables (Settings, Secrets and variables, Actions, Variables): `KEY_PROJECT`, `KEEPER_PROJECT`, `LOCATION`, `KEY_RING` and `KEY` (only if changed from the defaults), `ADMIN_GROUP`, `KEEPER_SA` (empty until step 5), `WIF_PROVIDER` (the provider's full resource name) and `CI_SERVICE_ACCOUNT`. These are public material, not secrets.
 4. Run the workflow once by hand and confirm the `check` job is green.
 
 ## Outside the scripts

@@ -52,6 +52,8 @@ jobs:
           KEY_PROJECT: ${{ vars.KEY_PROJECT }}
           KEEPER_PROJECT: ${{ vars.KEEPER_PROJECT }}
           LOCATION: ${{ vars.LOCATION }}
+          KEY_RING: ${{ vars.KEY_RING }}
+          KEY: ${{ vars.KEY }}
           ADMIN_GROUP: ${{ vars.ADMIN_GROUP }}
           KEEPER_SA: ${{ vars.KEEPER_SA }}
         run: |
@@ -59,6 +61,8 @@ jobs:
           KEY_PROJECT='$KEY_PROJECT'
           KEEPER_PROJECT='$KEEPER_PROJECT'
           LOCATION='$LOCATION'
+          KEY_RING='$KEY_RING'
+          KEY='$KEY'
           ADMIN_GROUP='$ADMIN_GROUP'
           KEEPER_SA='$KEEPER_SA'
           CFG
