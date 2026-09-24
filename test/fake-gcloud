@@ -1,0 +1,156 @@
+#!/bin/sh
+# gcloud stub for the golden tests. Logs each call to $FAKE_GCLOUD_LOG; answers
+# from canned state per $FAKE_GCLOUD_SCENARIO. In the log, --output-file paths
+# become <file> and set-iam-policy files become their canonical JSON.
+set -eu
+
+: "${FAKE_GCLOUD_LOG:?}" "${FAKE_GCLOUD_SCENARIO:?}" "${FAKE_ADMIN_MEMBER:?}" "${FAKE_KEEPER_SA:?}"
+
+ring_exists=yes key_exists=yes key_policy=full project_audit=yes
+versions=one version_state=ENABLED sa_key=no warn=no
+case "$FAKE_GCLOUD_SCENARIO" in
+  fresh) ring_exists=no key_exists=no key_policy=none project_audit=no
+    version_state=PENDING_GENERATION ;;
+  existing) ;;
+  foreign-key) key_exists=foreign ;;
+  admin-only) key_policy='admin' ;;
+  extra-binding) key_policy=extra ;;
+  two-versions) versions=two ;;
+  sa-key) sa_key=yes ;;
+  warn) warn=yes ;; # gcloud prints a warning on stderr
+  *) printf 'fake-gcloud: unknown scenario %s\n' "$FAKE_GCLOUD_SCENARIO" >&2; exit 98 ;;
+esac
+
+# Public key of secp256k1 private key 1.
+pem() {
+  cat <<EOT
+-----BEGIN PUBLIC KEY-----
+MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEeb5mfvncu6xVoGKVzocLBwKb/NstzijZ
+WfKBWxb4F5hIOtp3JqPEZV2k+/wOEQio/Re0SKaFVBmcR9CP+xDUuA==
+-----END PUBLIC KEY-----
+EOT
+}
+
+key_json() { # NAME
+  case "$key_exists" in
+    foreign) key_algorithm=EC_SIGN_P256_SHA256 key_protection=SOFTWARE ;;
+    *) key_algorithm=EC_SIGN_SECP256K1_SHA256 key_protection=HSM ;;
+  esac
+  printf '{"destroyScheduledDuration":"10368000s","name":"%s","purpose":"ASYMMETRIC_SIGN","versionTemplate":{"algorithm":"%s","protectionLevel":"%s"}}\n' \
+    "$1" "$key_algorithm" "$key_protection"
+}
+
+version_json() { # NAME STATE
+  printf '{"algorithm":"EC_SIGN_SECP256K1_SHA256","name":"%s","protectionLevel":"HSM","state":"%s"}' "$1" "$2"
+}
+
+key_policy_json() {
+  admin="{\"role\":\"roles/cloudkms.admin\",\"members\":[\"$FAKE_ADMIN_MEMBER\"]}"
+  viewer="{\"role\":\"roles/cloudkms.publicKeyViewer\",\"members\":[\"serviceAccount:$FAKE_KEEPER_SA\"]}"
+  signer="{\"role\":\"roles/cloudkms.signer\",\"members\":[\"serviceAccount:$FAKE_KEEPER_SA\"]}"
+  stray='{"role":"roles/cloudkms.viewer","members":["user:stray@example.com"]}'
+  case "$key_policy" in
+    none) printf '{"etag":"ACAB"}\n' ;;
+    admin) printf '{"bindings":[%s],"etag":"BwKeyAdmin","version":1}\n' "$admin" ;;
+    full) printf '{"bindings":[%s,%s,%s],"etag":"BwKeyFull","version":1}\n' "$admin" "$viewer" "$signer" ;;
+    extra) printf '{"bindings":[%s,%s,%s,%s],"etag":"BwKeyExtra","version":1}\n' "$admin" "$viewer" "$signer" "$stray" ;;
+  esac
+}
+
+project_policy_json() {
+  bindings="[{\"role\":\"roles/owner\",\"members\":[\"$FAKE_ADMIN_MEMBER\"]}]"
+  other_audit='{"service":"allServices","auditLogConfigs":[{"logType":"ADMIN_READ"}]}'
+  kms_audit='{"service":"cloudkms.googleapis.com","auditLogConfigs":[{"logType":"ADMIN_READ"},{"logType":"DATA_READ"},{"logType":"DATA_WRITE"}]}'
+  case "$project_audit" in
+    yes) printf '{"auditConfigs":[%s,%s],"bindings":%s,"etag":"BwProjAudited","version":1}\n' "$other_audit" "$kms_audit" "$bindings" ;;
+    no) printf '{"auditConfigs":[%s],"bindings":%s,"etag":"BwProjPlain","version":1}\n' "$other_audit" "$bindings" ;;
+  esac
+}
+
+project='' location='' keyring='' key='' filter='' output_file=''
+for arg in "$@"; do
+  case "$arg" in
+    --project=*) project=${arg#*=} ;;
+    --location=*) location=${arg#*=} ;;
+    --keyring=*) keyring=${arg#*=} ;;
+    --key=*) key=${arg#*=} ;;
+    --filter=*) filter=${arg#*=} ;;
+    --output-file=*) output_file=${arg#*=} ;;
+  esac
+done
+
+log_call() {
+  printf 'gcloud %s\n' "$*" >>"$FAKE_GCLOUD_LOG"
+  [ "$warn" = no ] || printf 'WARNING: Updates are available for some Google Cloud CLI components.\n' >&2
+}
+
+# Checks the etag matches what the fake returned; logs the file as canonical JSON.
+log_set_policy() { # EXPECTED_ETAG ARGS...
+  expected_etag=$1
+  shift
+  file=$(eval "printf '%s' \"\$$#\"")
+  [ "$(jq -r '.etag // ""' "$file")" = "$expected_etag" ] ||
+    { printf 'fake-gcloud: etag %s, expected %s\n' "$(jq -r .etag "$file")" "$expected_etag" >&2; exit 96; }
+  logged=''
+  while [ $# -gt 1 ]; do logged="$logged $1"; shift; done
+  log_call "${logged# } $(jq -c -S . "$file")"
+}
+
+case "$*" in
+  "services enable "*)
+    log_call "$@" ;;
+  "kms keyrings list "*)
+    log_call "$@"
+    if [ "$ring_exists" = yes ]; then printf '[{"name":"%s"}]\n' "${filter#name=}"; else printf '[]\n'; fi ;;
+  "kms keyrings create "*)
+    log_call "$@" ;;
+  "kms keys list "*)
+    log_call "$@"
+    if [ "$key_exists" = no ]; then printf '[]\n'; else printf '[%s]\n' "$(key_json "${filter#name=}")"; fi ;;
+  "kms keys create "*)
+    log_call "$@" ;;
+  "kms keys get-iam-policy "*)
+    log_call "$@"
+    key_policy_json ;;
+  "kms keys set-iam-policy "*)
+    log_set_policy "$(key_policy_json | jq -r .etag)" "$@" ;;
+  "kms keys versions describe "*)
+    log_call "$@"
+    version_json "$5" "$version_state"
+    printf '\n' ;;
+  "kms keys versions list "*)
+    log_call "$@"
+    v="projects/$project/locations/$location/keyRings/$keyring/cryptoKeys/$key/cryptoKeyVersions"
+    if [ "$versions" = two ]; then
+      printf '[%s,%s]\n' "$(version_json "$v/1" ENABLED)" "$(version_json "$v/2" ENABLED)"
+    else
+      printf '[%s]\n' "$(version_json "$v/1" "$version_state")"
+    fi ;;
+  "kms keys versions get-public-key "*)
+    logged=''
+    for arg in "$@"; do
+      case "$arg" in --output-file=*) logged="$logged --output-file=<file>" ;; *) logged="$logged $arg" ;; esac
+    done
+    log_call "${logged# }"
+    pem >"$output_file" ;;
+  "projects get-iam-policy "*)
+    log_call "$@"
+    project_policy_json ;;
+  "projects set-iam-policy "*)
+    log_set_policy "$(project_policy_json | jq -r .etag)" "$@" ;;
+  "iam service-accounts keys list "*)
+    log_call "$@"
+    if [ "$sa_key" = yes ]; then
+      sa_project=${FAKE_KEEPER_SA#*@}
+      printf '[{"keyType":"USER_MANAGED","name":"projects/%s/serviceAccounts/%s/keys/0123abcd"}]\n' "${sa_project%%.*}" "$FAKE_KEEPER_SA"
+    else
+      printf '[]\n'
+    fi ;;
+  "iam service-accounts describe "*)
+    log_call "$@"
+    printf '%s\n' "$4" ;;
+  *)
+    log_call "UNEXPECTED:" "$@"
+    printf 'fake-gcloud: unexpected call: gcloud %s\n' "$*" >&2
+    exit 99 ;;
+esac

@@ -1,0 +1,223 @@
+#!/bin/sh
+# Sourced by every script in sh/.
+# shellcheck disable=SC2034
+
+KMS_SERVICE=cloudkms.googleapis.com
+KEY_PURPOSE=asymmetric-signing
+KEY_PURPOSE_API=ASYMMETRIC_SIGN
+KEY_ALGORITHM=ec-sign-secp256k1-sha256
+KEY_ALGORITHM_API=EC_SIGN_SECP256K1_SHA256
+KEY_PROTECTION=hsm
+KEY_PROTECTION_API=HSM
+DESTROY_WINDOW=120d          # API maximum; immutable after create
+DESTROY_WINDOW_API=10368000s # 120 days in seconds
+
+REPO_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+POLICY_DIR=$REPO_ROOT/policy
+CONFIG_FILE=${HYDREX_CONFIG:-$REPO_ROOT/config.env}
+RECORD_DIR=${HYDREX_RECORD_DIR:-$REPO_ROOT/record}
+
+log() { printf '%s\n' "$*" >&2; }
+
+die() {
+  log "error: $*"
+  exit 1
+}
+
+make_tmp() {
+  TMP=$(mktemp -d)
+  trap 'rm -rf "$TMP"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+}
+
+# require_tools [EXTRA...]: gcloud and jq, plus any named extras.
+# shellcheck disable=SC2120
+require_tools() {
+  for tool in gcloud jq "$@"; do
+    command -v "$tool" >/dev/null 2>&1 || die "$tool not found on PATH"
+  done
+}
+
+load_config() {
+  [ -f "$CONFIG_FILE" ] || die "$CONFIG_FILE missing; copy config.env.example"
+  case "$CONFIG_FILE" in */*) ;; *) CONFIG_FILE=./$CONFIG_FILE ;; esac # else `.` searches PATH
+  unset KEY_PROJECT KEEPER_PROJECT LOCATION KEY_RING KEY ADMIN_MEMBER KEEPER_SA
+  # shellcheck source=/dev/null
+  . "$CONFIG_FILE"
+  LOCATION=${LOCATION:-us}
+  KEY_RING=${KEY_RING:-hydrex-keeper}
+  KEY=${KEY:-hydrex-keeper-v1}
+  KEEPER_SA=${KEEPER_SA:-}
+
+  for required in KEY_PROJECT KEEPER_PROJECT ADMIN_MEMBER; do
+    eval "value=\${$required:-}"
+    [ -n "$value" ] || die "$required is not set in $CONFIG_FILE"
+  done
+  [ "$KEY_PROJECT" != "$KEEPER_PROJECT" ] ||
+    die "KEY_PROJECT and KEEPER_PROJECT must differ"
+  case "$ADMIN_MEMBER" in
+    user:?*@?* | group:?*@?*) ;;
+    *) die "ADMIN_MEMBER must be user:EMAIL or group:EMAIL" ;;
+  esac
+  if [ -n "$KEEPER_SA" ]; then
+    case "$KEEPER_SA" in
+      *"@$KEEPER_PROJECT.iam.gserviceaccount.com") ;;
+      *) die "KEEPER_SA must be a service account in $KEEPER_PROJECT" ;;
+    esac
+  fi
+
+  KEY_RING_NAME=projects/$KEY_PROJECT/locations/$LOCATION/keyRings/$KEY_RING
+  KEY_NAME=$KEY_RING_NAME/cryptoKeys/$KEY
+  KEY_VERSION_NAME=$KEY_NAME/cryptoKeyVersions/1
+}
+
+# Renders policy/key.iam.json.tmpl. Bindings with an empty principal are dropped.
+render_key_policy() {
+  jq --arg admin "$ADMIN_MEMBER" --arg keeper "$KEEPER_SA" '
+    walk(if type == "string"
+         then (split("${ADMIN_MEMBER}") | join($admin)) | (split("${KEEPER_SA}") | join($keeper))
+         else . end)
+    | .bindings |= map(.members |= map(select(endswith(":") | not)) | select(.members | length > 0))
+  ' "$POLICY_DIR/key.iam.json.tmpl"
+}
+
+# json_field JSON FILTER: "" if null or absent.
+json_field() {
+  printf '%s\n' "$1" | jq -r "($2) // \"\"" || die "cannot parse JSON"
+}
+
+# Sets purpose, algorithm, protection, window. True if the first three are as expected.
+read_key_attrs() {
+  purpose=$(json_field "$1" .purpose)
+  algorithm=$(json_field "$1" .versionTemplate.algorithm)
+  protection=$(json_field "$1" .versionTemplate.protectionLevel)
+  window=$(json_field "$1" .destroyScheduledDuration)
+  [ "$purpose" = "$KEY_PURPOSE_API" ] && [ "$algorithm" = "$KEY_ALGORITHM_API" ] && [ "$protection" = "$KEY_PROTECTION_API" ]
+}
+
+# Sets version_state, version_algorithm, version_protection. True if the last two are as expected.
+read_version_attrs() {
+  version_state=$(json_field "$1" .state)
+  version_algorithm=$(json_field "$1" .algorithm)
+  version_protection=$(json_field "$1" .protectionLevel)
+  [ "$version_algorithm" = "$KEY_ALGORITHM_API" ] && [ "$version_protection" = "$KEY_PROTECTION_API" ]
+}
+
+# Sets recorded_version, recorded_address from record/keeper.json.
+read_record() {
+  record_file=$RECORD_DIR/keeper.json
+  [ -f "$record_file" ] || die "$record_file missing; run address.sh"
+  record_json=$(jq -ce 'select(type == "object")' "$record_file" 2>/dev/null) || die "$record_file is not a JSON object"
+  recorded_version=$(json_field "$record_json" .version)
+  recorded_address=$(json_field "$record_json" .address)
+}
+
+# A filtered list returns empty when the resource is absent, instead of an error.
+find_keyring() {
+  find_keyring_list=$(gcloud kms keyrings list --project="$KEY_PROJECT" --location="$LOCATION" \
+    --filter="name=$KEY_RING_NAME" --format=json)
+  printf '%s\n' "$find_keyring_list" | jq -r --arg name "$KEY_RING_NAME" '.[] | select(.name == $name) | .name'
+}
+
+find_key() {
+  find_key_list=$(gcloud kms keys list --project="$KEY_PROJECT" --location="$LOCATION" --keyring="$KEY_RING" \
+    --filter="name=$KEY_NAME" --format=json)
+  printf '%s\n' "$find_key_list" | jq -c --arg name "$KEY_NAME" '.[] | select(.name == $name)'
+}
+
+describe_version_1() {
+  version_json=$(gcloud kms keys versions describe "$KEY_VERSION_NAME" --format=json)
+  read_version_attrs "$version_json" || die "version 1 is algorithm=$version_algorithm protectionLevel=$version_protection"
+}
+
+# Canonical policy: sorted bindings and audit configs, without etag and version.
+normalize_policy() {
+  jq -S '{
+    bindings: ((.bindings // [])
+      | map({role, members: ((.members // []) | sort)} + (if .condition then {condition} else {} end))
+      | sort_by([.role, ((.condition // {}) | tojson)])),
+    auditConfigs: ((.auditConfigs // [])
+      | map({service, auditLogConfigs: ((.auditLogConfigs // [])
+          | map({logType} + (if .exemptedMembers then {exemptedMembers: (.exemptedMembers | sort)} else {} end))
+          | sort_by(.logType))})
+      | sort_by(.service))
+  }'
+}
+
+# policy_differs LIVE DESIRED. Leaves live_norm and desired_norm set.
+policy_differs() {
+  live_norm=$(printf '%s\n' "$1" | normalize_policy)
+  desired_norm=$(printf '%s\n' "$2" | normalize_policy)
+  [ "$live_norm" != "$desired_norm" ]
+}
+
+# Prints the diff from the last policy_differs.
+show_policy_diff() {
+  printf '%s\n' "$desired_norm" >"$TMP/expected.json"
+  printf '%s\n' "$live_norm" >"$TMP/live.json"
+  diff -u "$TMP/expected.json" "$TMP/live.json" >&2 || true
+}
+
+# get_iam RESOURCE gcloud-subcommand...
+get_iam() {
+  iam_resource=$1
+  shift
+  gcloud "$@" get-iam-policy "$iam_resource" --format=json
+}
+
+# write_iam_if_changed RESOURCE LIVE DESIRED gcloud-subcommand...: writes DESIRED in full with LIVE's etag.
+write_iam_if_changed() {
+  iam_resource=$1
+  iam_live=$2
+  iam_desired=$3
+  shift 3
+  if ! policy_differs "$iam_live" "$iam_desired"; then
+    log "iam: $iam_resource unchanged"
+    return 0
+  fi
+  iam_etag=$(printf '%s\n' "$iam_live" | jq -r '.etag // empty')
+  iam_file=$TMP/policy.json
+  printf '%s\n' "$iam_desired" | jq --arg etag "$iam_etag" '.etag = $etag' >"$iam_file"
+  log "iam: writing $iam_resource"
+  gcloud "$@" set-iam-policy "$iam_resource" "$iam_file" >/dev/null
+}
+
+# set_iam_authoritative RESOURCE DESIRED gcloud-subcommand...
+set_iam_authoritative() {
+  set_iam_resource=$1
+  set_iam_desired=$2
+  shift 2
+  set_iam_live=$(get_iam "$set_iam_resource" "$@")
+  write_iam_if_changed "$set_iam_resource" "$set_iam_live" "$set_iam_desired" "$@"
+}
+
+require_keccak() {
+  printf '' | openssl dgst -KECCAK-256 >/dev/null 2>&1 ||
+    die "$(openssl version) has no KECCAK-256; needs OpenSSL 3.2 or newer"
+}
+
+keccak256_hex() {
+  openssl dgst -KECCAK-256 -binary | od -An -v -tx1 | tr -d ' \n'
+}
+
+# derive_address PEM: DER, last 64 bytes (X||Y), keccak256, last 20 bytes, EIP-55 checksum.
+SECP256K1_SPKI_PREFIX=3056301006072a8648ce3d020106052b8104000a03420004
+
+derive_address() {
+  derive_der=$TMP/pub.der
+  openssl pkey -pubin -in "$1" -outform DER -out "$derive_der"
+  derive_hex=$(od -An -v -tx1 "$derive_der" | tr -d ' \n')
+  case "$derive_hex" in
+    "$SECP256K1_SPKI_PREFIX"*) ;;
+    *) die "not an uncompressed secp256k1 SPKI" ;;
+  esac
+  [ ${#derive_hex} -eq 176 ] || die "unexpected DER length"
+  derive_lower=$(tail -c 64 "$derive_der" | keccak256_hex | tail -c 40)
+  derive_mask=$(printf '%s' "$derive_lower" | keccak256_hex)
+  [ ${#derive_lower} -eq 40 ] && [ ${#derive_mask} -eq 64 ] || die "Keccak-256 failed"
+  awk -v a="$derive_lower" -v h="$derive_mask" 'BEGIN {
+    printf "0x"
+    for (i = 1; i <= 40; i++) { c = substr(a, i, 1); printf "%s", (c ~ /[a-f]/ && index("89abcdef", substr(h, i, 1))) ? toupper(c) : c }
+    printf "\n" }'
+}
