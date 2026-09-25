@@ -1,4 +1,4 @@
-gcloud services enable cloudkms.googleapis.com orgpolicy.googleapis.com --project=hydrex-keeper-key-test
+gcloud services enable cloudkms.googleapis.com --project=hydrex-keeper-key-test
 gcloud kms keyrings list --project=hydrex-keeper-key-test --location=us --filter=name=projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper --format=json
 gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --filter=name=projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/keeper --format=json
 exit=1

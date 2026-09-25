@@ -1,4 +1,4 @@
-gcloud services enable cloudkms.googleapis.com orgpolicy.googleapis.com --project=hydrex-keeper-key-test
+gcloud services enable cloudkms.googleapis.com --project=hydrex-keeper-key-test
 gcloud kms keyrings list --project=hydrex-keeper-key-test --location=us --filter=name=projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper --format=json
 gcloud kms keyrings create projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper
 gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --filter=name=projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/keeper --format=json
@@ -7,7 +7,5 @@ gcloud kms keys get-iam-policy projects/hydrex-keeper-key-test/locations/us/keyR
 gcloud kms keys set-iam-policy projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/keeper {"bindings":[{"members":["user:hydrex-key-admin@example.com"],"role":"roles/cloudkms.admin"}],"etag":"ACAB"}
 gcloud projects get-iam-policy hydrex-keeper-key-test --format=json
 gcloud projects set-iam-policy hydrex-keeper-key-test {"auditConfigs":[{"auditLogConfigs":[{"logType":"ADMIN_READ"}],"service":"allServices"},{"auditLogConfigs":[{"logType":"ADMIN_READ"},{"logType":"DATA_READ"},{"logType":"DATA_WRITE"}],"service":"cloudkms.googleapis.com"}],"bindings":[{"members":["user:hydrex-key-admin@example.com"],"role":"roles/owner"}],"etag":"BwProjPlain","version":1}
-gcloud org-policies describe iam.managed.disableServiceAccountKeyCreation --project=hydrex-keeper-key-test --effective --format=json
-gcloud org-policies set-policy name: projects/hydrex-keeper-key-test/policies/iam.managed.disableServiceAccountKeyCreation spec:   rules:     - enforce: true 
 gcloud kms keys versions describe projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/keeper/cryptoKeyVersions/1 --format=json
 exit=0

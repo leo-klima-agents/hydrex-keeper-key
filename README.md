@@ -10,9 +10,9 @@ Two GCP projects. The key project holds one key ring and one key, administered b
 
 | Script | Needs |
 |---|---|
-| `setup.sh` | `roles/owner` on the key project. `roles/orgpolicy.policyAdmin` on the org or folder for step 6, otherwise it warns and continues. |
-| `address.sh`, `check.sh` | being `ADMIN_MEMBER`, or a member of it if it is a group |
-| `grant.sh` | as above, plus `roles/iam.serviceAccountViewer` on the keeper project |
+| `setup.sh` | `roles/owner` on the key project |
+| `address.sh` | being `ADMIN_MEMBER`, or a member of it if it is a group |
+| `grant.sh`, `check.sh` | as above, plus `roles/iam.serviceAccountViewer` on the keeper project |
 
 ## 1. Configure
 
@@ -30,7 +30,7 @@ Location defaults to `us`. One signature a week makes latency irrelevant; multi-
 sh/setup.sh
 ```
 
-Enables the KMS and Org Policy APIs, creates the key ring and the key (asymmetric signing, secp256k1, HSM, 120-day destroy window), writes the key IAM policy, turns on KMS Data Access audit logs, and enforces `iam.managed.disableServiceAccountKeyCreation` on the project. Safe to re-run; a second run changes nothing. An existing key with different attributes is refused.
+Enables the KMS API, creates the key ring and the key (asymmetric signing, secp256k1, HSM, 120-day destroy window), writes the key IAM policy, and turns on KMS Data Access audit logs. Safe to re-run; a second run changes nothing. An existing key with different attributes is refused.
 
 Confirm in the console: one ring, one key, one version, HSM, secp256k1, 120 days, only `ADMIN_MEMBER` on the key, all three KMS audit log types on.
 
@@ -72,11 +72,11 @@ Safe to re-run.
 sh/check.sh
 ```
 
-Read-only. Fails if the live key no longer derives to the recorded address, a second version exists, version 1 is not enabled, key attributes or destroy window changed, the key IAM policy differs from the template, the audit config or org policy is off. Run it after each step above. After step 5, `KEEPER_SA` must be set in `config.env` or the grant reads as drift.
+Read-only. Fails if the live key no longer derives to the recorded address, a second version exists, version 1 is not enabled, key attributes or destroy window changed, the key IAM policy differs from the template, the audit config is off, or `KEEPER_SA` has a user-managed (downloadable) key. Run it after each step above. After step 5, `KEEPER_SA` must be set in `config.env` or the grant reads as drift.
 
 CI runs it every Friday after the vote, and on demand from the Actions tab. One-time setup, done once by an admin:
 
-1. In the key project, create a service account for CI, say `ci-check@KEY_PROJECT.iam.gserviceaccount.com`. Grant it `roles/cloudkms.viewer` on the key ring, and `roles/iam.securityReviewer` and `roles/orgpolicy.policyViewer` on the project. It can read everything `check.sh` needs and write nothing.
+1. In the key project, create a service account for CI, say `ci-check@KEY_PROJECT.iam.gserviceaccount.com`. Grant it `roles/cloudkms.viewer` on the key ring and `roles/iam.securityReviewer` on the project, and, once `KEEPER_SA` exists, `roles/iam.serviceAccountViewer` on `KEEPER_SA`. It can read everything `check.sh` needs and write nothing.
 2. Create a Workload Identity Federation pool and an OIDC provider for GitHub (`--issuer-uri=https://token.actions.githubusercontent.com`, attribute mapping `google.subject=assertion.sub,attribute.repository=assertion.repository`, attribute condition restricting `assertion.repository` to this repo). Grant the pool's principal set for this repo `roles/iam.workloadIdentityUser` on the CI service account.
 3. Set repository variables (Settings, Secrets and variables, Actions, Variables): `KEY_PROJECT`, `KEEPER_PROJECT`, `LOCATION`, `KEY_RING` and `KEY` (only if changed from the defaults), `ADMIN_MEMBER`, `KEEPER_SA` (empty until step 5), `WIF_PROVIDER` (the provider's full resource name) and `CI_SERVICE_ACCOUNT`. These are public material, not secrets.
 4. Run the workflow once by hand and confirm the `check` job is green.
@@ -87,6 +87,7 @@ CI runs it every Friday after the vote, and on demand from the Actions tab. One-
 2. KMS audit logs land in `_Default`, which keeps 30 days. Sink them to a locked bucket with longer retention in a project the admins do not own.
 3. Admins can schedule the key's destruction and cancel it within 120 days. Alert on `DestroyCryptoKeyVersion` and `UpdateCryptoKeyVersion`.
 4. A project owner can always re-grant `cloudkms.admin`. The key project's owners must be `ADMIN_MEMBER` or fewer, with no org-level owner reaching it. Nothing here can check this.
+5. `KEEPER_SA` can sign, so a downloadable key for it could sign from anywhere. Enforce `iam.managed.disableServiceAccountKeyCreation` on the keeper project, or on the org or folder above both projects, wherever the keeper project is set up. `check.sh` only detects a key after the fact.
 
 ## Development
 

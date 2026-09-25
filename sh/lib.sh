@@ -2,7 +2,6 @@
 # Sourced by every script in sh/.
 # shellcheck disable=SC2034
 
-SERVICES="cloudkms.googleapis.com orgpolicy.googleapis.com"
 KMS_SERVICE=cloudkms.googleapis.com
 KEY_PURPOSE=asymmetric-signing
 KEY_PURPOSE_API=ASYMMETRIC_SIGN
@@ -12,7 +11,6 @@ KEY_PROTECTION=hsm
 KEY_PROTECTION_API=HSM
 DESTROY_WINDOW=120d          # API maximum; immutable after create
 DESTROY_WINDOW_API=10368000s # 120 days in seconds
-SA_KEY_CONSTRAINT=iam.managed.disableServiceAccountKeyCreation
 
 REPO_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 POLICY_DIR=$REPO_ROOT/policy
@@ -126,13 +124,6 @@ find_key() {
   find_key_list=$(gcloud kms keys list --project="$KEY_PROJECT" --location="$LOCATION" --keyring="$KEY_RING" \
     --filter="name=$KEY_NAME" --format=json)
   printf '%s\n' "$find_key_list" | jq -c --arg name "$KEY_NAME" '.[] | select(.name == $name)'
-}
-
-# 0 enforced, 1 not enforced, 2 could not read.
-org_policy_enforced() {
-  org_policy_json=$(gcloud org-policies describe "$SA_KEY_CONSTRAINT" \
-    --project="$KEY_PROJECT" --effective --format=json) || return 2
-  [ "$(printf '%s\n' "$org_policy_json" | jq -r '[.spec.rules[]?.enforce] | any')" = "true" ]
 }
 
 describe_version_1() {

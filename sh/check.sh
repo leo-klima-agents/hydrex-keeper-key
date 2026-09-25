@@ -120,13 +120,20 @@ else
   ok "audit config for $KMS_SERVICE matches policy/audit.json"
 fi
 
-# Org policy. A failed read is a gcloud failure, not drift.
-org_policy_enforced && org_status=0 || org_status=$?
-case "$org_status" in
-  0) ok "$SA_KEY_CONSTRAINT enforced" ;;
-  2) die "cannot read $SA_KEY_CONSTRAINT" ;;
-  *) fail "$SA_KEY_CONSTRAINT not enforced" ;;
-esac
+# KEEPER_SA can sign; a downloadable key for it could sign from anywhere. Preventing
+# one is the keeper project's job (iam.managed.disableServiceAccountKeyCreation); this detects it.
+if [ -z "$KEEPER_SA" ]; then
+  log "skipping KEEPER_SA key check: KEEPER_SA is empty"
+else
+  sa_keys=$(gcloud iam service-accounts keys list --iam-account="$KEEPER_SA" --managed-by=user --format=json) ||
+    die "cannot list keys of $KEEPER_SA"
+  sa_key_ids=$(printf '%s\n' "$sa_keys" | jq -r '[.[].name | split("/") | last] | join(" ")')
+  if [ -z "$sa_key_ids" ]; then
+    ok "$KEEPER_SA has no user-managed keys"
+  else
+    fail "$KEEPER_SA has user-managed keys: $sa_key_ids"
+  fi
+fi
 
 [ "$failed" -ne 0 ] || log "all checks passed"
 exit "$failed"

@@ -9,12 +9,10 @@ require_tools
 load_config
 make_tmp
 
-log "== 1/7 APIs"
-# A no-op for APIs already enabled. Word splitting is intended.
-# shellcheck disable=SC2086
-gcloud services enable $SERVICES --project="$KEY_PROJECT"
+log "== 1/6 KMS API"
+gcloud services enable "$KMS_SERVICE" --project="$KEY_PROJECT" # no-op if already enabled
 
-log "== 2/7 key ring"
+log "== 2/6 key ring"
 ring=$(find_keyring)
 if [ "$ring" = "$KEY_RING_NAME" ]; then
   log "exists: $KEY_RING_NAME"
@@ -23,7 +21,7 @@ else
   gcloud kms keyrings create "$KEY_RING_NAME"
 fi
 
-log "== 3/7 key"
+log "== 3/6 key"
 key=$(find_key)
 if [ -z "$key" ]; then
   log "creating $KEY_NAME"
@@ -41,32 +39,19 @@ else
   log "exists: $KEY_NAME"
 fi
 
-log "== 4/7 key IAM"
+log "== 4/6 key IAM"
 [ -n "$KEEPER_SA" ] || log "KEEPER_SA empty: admin only"
 key_policy=$(render_key_policy)
 set_iam_authoritative "$KEY_NAME" "$key_policy" kms keys
 
 # Project bindings are kept; only the KMS audit entry is replaced.
-log "== 5/7 audit logs"
+log "== 5/6 audit logs"
 project_policy=$(get_iam "$KEY_PROJECT" projects)
 desired=$(printf '%s\n' "$project_policy" | jq --slurpfile audit "$POLICY_DIR/audit.json" \
   '.auditConfigs = ((.auditConfigs // []) | map(select(.service != $audit[0].service))) + $audit')
 write_iam_if_changed "$KEY_PROJECT" "$project_policy" "$desired" projects
 
-log "== 6/7 org policy"
-org_policy_enforced && org_status=0 || org_status=$?
-case "$org_status" in
-  0) log "$SA_KEY_CONSTRAINT enforced" ;;
-  2) log "WARNING: cannot read $SA_KEY_CONSTRAINT; not setting it" ;;
-  *) sed "s|\${KEY_PROJECT}|$KEY_PROJECT|" "$POLICY_DIR/org-policy.yaml" >"$TMP/org-policy.yaml"
-     if gcloud org-policies set-policy "$TMP/org-policy.yaml" >/dev/null; then
-       log "$SA_KEY_CONSTRAINT now enforced"
-     else
-       log "WARNING: cannot enforce $SA_KEY_CONSTRAINT (needs orgpolicy.policy.set)"
-     fi ;;
-esac
-
-log "== 7/7 key version"
+log "== 6/6 key version"
 describe_version_1
 log "state: $version_state"
 [ "$version_state" = "ENABLED" ] || log "run address.sh once ENABLED"

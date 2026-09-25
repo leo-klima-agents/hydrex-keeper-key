@@ -2,5 +2,5 @@ gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hy
 gcloud kms keys versions list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --key=keeper --format=json
 gcloud kms keys get-iam-policy projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/keeper --format=json
 gcloud projects get-iam-policy hydrex-keeper-key-test --format=json
-gcloud org-policies describe iam.managed.disableServiceAccountKeyCreation --project=hydrex-keeper-key-test --effective --format=json
+gcloud iam service-accounts keys list --iam-account=hydrex-keeper@hydrex-keeper-rt-test.iam.gserviceaccount.com --managed-by=user --format=json
 exit=1
