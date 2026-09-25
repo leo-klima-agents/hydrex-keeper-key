@@ -6,7 +6,7 @@ Two GCP projects. The key project holds one key ring and one key, administered b
 
 ## Prerequisites
 
-`gcloud`, `jq`, `openssl`, and `cast` from [Foundry](https://getfoundry.sh).
+`gcloud`, `jq`, and `openssl` 3.2 or newer, which added Keccak-256. Ubuntu 26.04 and Debian 13 ship it; on macOS use Homebrew's `openssl@3`.
 
 | Script | Needs |
 |---|---|
@@ -47,9 +47,10 @@ To verify the address without the script:
 
 ```sh
 openssl pkey -pubin -in record/keeper.pem -outform DER -out keeper.der
-XY=$(tail -c 64 keeper.der | od -An -v -tx1 | tr -d ' \n')
-cast to-check-sum-address "0x$(cast keccak "0x$XY" | tr -d '\n' | tail -c 40)"
+tail -c 64 keeper.der | openssl dgst -KECCAK-256 | tail -c 41
 ```
+
+This prints the address in lowercase hex without `0x`; compare it with `address` ignoring case, which only carries the EIP-55 checksum.
 
 ## 4. Deploy the module
 

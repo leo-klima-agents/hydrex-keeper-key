@@ -14,7 +14,8 @@ case "${1:-}" in
   *) die "usage: $0 [--force]" ;;
 esac
 
-require_tools openssl cast
+require_tools openssl
+require_keccak
 load_config
 make_tmp
 

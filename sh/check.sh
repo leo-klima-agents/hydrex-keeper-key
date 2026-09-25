@@ -7,7 +7,8 @@ script_dir=$(dirname -- "$0")
 . "$script_dir/lib.sh"
 
 [ $# -eq 0 ] || die "usage: $0"
-require_tools openssl cast
+require_tools openssl
+require_keccak
 load_config
 make_tmp
 
