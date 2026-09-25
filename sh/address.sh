@@ -28,7 +28,6 @@ pem=$TMP/keeper.pem
 gcloud kms keys versions get-public-key "$KEY_VERSION_NAME" --output-file="$pem"
 address=$(derive_address "$pem")
 
-# Rewriting a matching record leaves the same bytes, so git sees no change.
 if [ -f "$RECORD_DIR/keeper.json" ] && [ "$force" = no ]; then
   read_record
   if [ "$recorded_version" != "$KEY_VERSION_NAME" ] || [ "$recorded_address" != "$address" ]; then

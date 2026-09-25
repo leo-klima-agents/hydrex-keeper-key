@@ -120,8 +120,6 @@ else
   ok "audit config for $KMS_SERVICE matches policy/audit.json"
 fi
 
-# KEEPER_SA can sign; a downloadable key for it could sign from anywhere. Preventing
-# one is the keeper project's job (iam.managed.disableServiceAccountKeyCreation); this detects it.
 if [ -z "$KEEPER_SA" ]; then
   log "skipping KEEPER_SA key check: KEEPER_SA is empty"
 else

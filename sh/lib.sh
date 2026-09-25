@@ -82,7 +82,7 @@ render_key_policy() {
   ' "$POLICY_DIR/key.iam.json.tmpl"
 }
 
-# json_field JSON FILTER: the value FILTER selects, "" if null or absent.
+# json_field JSON FILTER: "" if null or absent.
 json_field() {
   printf '%s\n' "$1" | jq -r "($2) // \"\"" || die "cannot parse JSON"
 }
@@ -192,13 +192,11 @@ set_iam_authoritative() {
   write_iam_if_changed "$set_iam_resource" "$set_iam_live" "$set_iam_desired" "$@"
 }
 
-# require_keccak: openssl must have Keccak-256, added in OpenSSL 3.2.
 require_keccak() {
   printf '' | openssl dgst -KECCAK-256 >/dev/null 2>&1 ||
     die "$(openssl version) has no KECCAK-256; needs OpenSSL 3.2 or newer"
 }
 
-# keccak256_hex: Keccak-256 of stdin, as lowercase hex.
 keccak256_hex() {
   openssl dgst -KECCAK-256 -binary | od -An -v -tx1 | tr -d ' \n'
 }
@@ -218,7 +216,6 @@ derive_address() {
   derive_lower=$(tail -c 64 "$derive_der" | keccak256_hex | tail -c 40)
   derive_mask=$(printf '%s' "$derive_lower" | keccak256_hex)
   [ ${#derive_lower} -eq 40 ] && [ ${#derive_mask} -eq 64 ] || die "Keccak-256 failed"
-  # EIP-55: uppercase each letter whose nibble in keccak256(lowercase hex address) is 8 or more.
   awk -v a="$derive_lower" -v h="$derive_mask" 'BEGIN {
     printf "0x"
     for (i = 1; i <= 40; i++) { c = substr(a, i, 1); printf "%s", (c ~ /[a-f]/ && index("89abcdef", substr(h, i, 1))) ? toupper(c) : c }

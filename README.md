@@ -6,7 +6,7 @@ Two GCP projects. The key project holds one key ring and one key, administered b
 
 ## Prerequisites
 
-`gcloud`, `jq`, and `openssl` 3.2 or newer, which added Keccak-256. Ubuntu 26.04 and Debian 13 ship it; on macOS use Homebrew's `openssl@3`.
+`gcloud`, `jq`, and `openssl` 3.2 or newer.
 
 | Script | Needs |
 |---|---|
@@ -50,8 +50,6 @@ openssl pkey -pubin -in record/keeper.pem -outform DER -out keeper.der
 tail -c 64 keeper.der | openssl dgst -KECCAK-256 | tail -c 41
 ```
 
-This prints the address in lowercase hex without `0x`; compare it with `address` ignoring case, which only carries the EIP-55 checksum.
-
 ## 4. Deploy the module
 
 `address` in `record/keeper.json` is the `KEEPER` of `hydrex-conduit-executor`. It is immutable in the module, so a new key means a new module. Have the module's deploy script read the address from a copy of `record/keeper.json` rather than paste it.
@@ -72,7 +70,7 @@ Safe to re-run.
 sh/check.sh
 ```
 
-Read-only. Fails if the live key no longer derives to the recorded address, a second version exists, version 1 is not enabled, key attributes or destroy window changed, the key IAM policy differs from the template, the audit config is off, or `KEEPER_SA` has a user-managed (downloadable) key. Run it after each step above. After step 5, `KEEPER_SA` must be set in `config.env` or the grant reads as drift.
+Read-only. Fails if the live key no longer derives to the recorded address, a second version exists, version 1 is not enabled, key attributes or destroy window changed, the key IAM policy differs from the template, the audit config is off, or `KEEPER_SA` has a user-managed key. Run it after each step above. After step 5, `KEEPER_SA` must be set in `config.env` or the grant reads as drift.
 
 CI runs it every Friday after the vote, and on demand from the Actions tab. One-time setup, done once by an admin:
 
@@ -87,7 +85,7 @@ CI runs it every Friday after the vote, and on demand from the Actions tab. One-
 2. KMS audit logs land in `_Default`, which keeps 30 days. Sink them to a locked bucket with longer retention in a project the admins do not own.
 3. Admins can schedule the key's destruction and cancel it within 120 days. Alert on `DestroyCryptoKeyVersion` and `UpdateCryptoKeyVersion`.
 4. A project owner can always re-grant `cloudkms.admin`. The key project's owners must be `ADMIN_MEMBER` or fewer, with no org-level owner reaching it. Nothing here can check this.
-5. `KEEPER_SA` can sign, so a downloadable key for it could sign from anywhere. Enforce `iam.managed.disableServiceAccountKeyCreation` on the keeper project, or on the org or folder above both projects, wherever the keeper project is set up. `check.sh` only detects a key after the fact.
+5. Enforce `iam.managed.disableServiceAccountKeyCreation` on the keeper project. `check.sh` only detects a user-managed key on `KEEPER_SA`.
 
 ## Development
 

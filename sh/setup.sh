@@ -10,7 +10,7 @@ load_config
 make_tmp
 
 log "== 1/6 KMS API"
-gcloud services enable "$KMS_SERVICE" --project="$KEY_PROJECT" # no-op if already enabled
+gcloud services enable "$KMS_SERVICE" --project="$KEY_PROJECT"
 
 log "== 2/6 key ring"
 ring=$(find_keyring)

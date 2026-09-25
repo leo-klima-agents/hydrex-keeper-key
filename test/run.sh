@@ -65,7 +65,7 @@ compare() {
 golden_case setup-fresh fresh admin-only "$fixtures/empty" setup.sh
 golden_case setup-existing existing with-keeper "$fixtures/empty" setup.sh
 golden_case setup-foreign-key foreign-key admin-only "$fixtures/empty" setup.sh
-golden_case setup-warn warn with-keeper "$fixtures/empty" setup.sh # a gcloud warning on stderr must not corrupt parsed output
+golden_case setup-warn warn with-keeper "$fixtures/empty" setup.sh
 golden_case grant-fresh admin-only with-keeper "$fixtures/empty" grant.sh
 
 # address.sh output must equal test/fixtures/record, which the check cases read.
@@ -96,7 +96,7 @@ golden_case check-two-versions two-versions with-keeper "$fixtures/record" check
 golden_case check-sa-key sa-key with-keeper "$fixtures/record" check.sh
 golden_case check-admin-only admin-only admin-only "$fixtures/record" check.sh
 
-# A committed keeper.pem for another key fails the record check and skips the address check.
+# A keeper.pem for another key is refused.
 mkdir "$tmp/record-other-pem"
 cp "$fixtures/record/keeper.json" "$tmp/record-other-pem/"
 openssl ecparam -name secp256k1 -genkey -noout 2>/dev/null | openssl ec -pubout -out "$tmp/record-other-pem/keeper.pem" 2>/dev/null
