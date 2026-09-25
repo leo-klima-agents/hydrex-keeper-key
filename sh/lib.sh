@@ -2,7 +2,6 @@
 # Sourced by every script in sh/.
 # shellcheck disable=SC2034
 
-MIN_GCLOUD_VERSION=470.0.0
 SERVICES="cloudkms.googleapis.com orgpolicy.googleapis.com"
 KMS_SERVICE=cloudkms.googleapis.com
 KEY_PURPOSE=asymmetric-signing
@@ -34,26 +33,12 @@ make_tmp() {
   trap 'exit 143' TERM
 }
 
-# version_ge HAVE MIN: compares the first three dotted numbers.
-version_ge() {
-  printf '%s %s\n' "$1" "$2" | awk '{
-    split($1, a, "."); split($2, b, ".")
-    for (i = 1; i <= 3; i++) { if (a[i] + 0 > b[i] + 0) exit 0; if (a[i] + 0 < b[i] + 0) exit 1 }
-    exit 0 }'
-}
-
 # require_tools [EXTRA...]: gcloud and jq, plus any named extras.
 # shellcheck disable=SC2120
 require_tools() {
   for tool in gcloud jq "$@"; do
     command -v "$tool" >/dev/null 2>&1 || die "$tool not found on PATH"
   done
-  gcloud_version_json=$(gcloud version --format=json)
-  gcloud_version=$(printf '%s\n' "$gcloud_version_json" | jq -r '."Google Cloud SDK" // ""')
-  case "$gcloud_version" in
-    "" | *[!0-9.]*) die "cannot parse gcloud version '$gcloud_version'" ;;
-  esac
-  version_ge "$gcloud_version" "$MIN_GCLOUD_VERSION" || die "gcloud $gcloud_version < $MIN_GCLOUD_VERSION"
 }
 
 load_config() {
@@ -99,38 +84,35 @@ render_key_policy() {
   ' "$POLICY_DIR/key.iam.json.tmpl"
 }
 
-TAB=$(printf '\t')
-json_fields() { # JSON JQ_ARRAY_EXPR
-  printf '%s\n' "$1" | jq -r "$2 | map(.//\"\") | @tsv" || die "cannot parse JSON"
+# json_field JSON FILTER: the value FILTER selects, "" if null or absent.
+json_field() {
+  printf '%s\n' "$1" | jq -r "($2) // \"\"" || die "cannot parse JSON"
 }
 
 # Sets purpose, algorithm, protection, window. True if the first three are as expected.
 read_key_attrs() {
-  key_fields=$(json_fields "$1" '[.purpose, .versionTemplate.algorithm, .versionTemplate.protectionLevel, .destroyScheduledDuration]')
-  IFS=$TAB read -r purpose algorithm protection window <<EOT
-$key_fields
-EOT
+  purpose=$(json_field "$1" .purpose)
+  algorithm=$(json_field "$1" .versionTemplate.algorithm)
+  protection=$(json_field "$1" .versionTemplate.protectionLevel)
+  window=$(json_field "$1" .destroyScheduledDuration)
   [ "$purpose" = "$KEY_PURPOSE_API" ] && [ "$algorithm" = "$KEY_ALGORITHM_API" ] && [ "$protection" = "$KEY_PROTECTION_API" ]
 }
 
 # Sets version_state, version_algorithm, version_protection. True if the last two are as expected.
 read_version_attrs() {
-  version_fields=$(json_fields "$1" '[.state, .algorithm, .protectionLevel]')
-  IFS=$TAB read -r version_state version_algorithm version_protection <<EOT
-$version_fields
-EOT
+  version_state=$(json_field "$1" .state)
+  version_algorithm=$(json_field "$1" .algorithm)
+  version_protection=$(json_field "$1" .protectionLevel)
   [ "$version_algorithm" = "$KEY_ALGORITHM_API" ] && [ "$version_protection" = "$KEY_PROTECTION_API" ]
 }
 
-# Sets recorded_version, recorded_address, recorded_sha from record/keeper.json.
+# Sets recorded_version, recorded_address from record/keeper.json.
 read_record() {
   record_file=$RECORD_DIR/keeper.json
   [ -f "$record_file" ] || die "$record_file missing; run address.sh"
   record_json=$(jq -ce 'select(type == "object")' "$record_file" 2>/dev/null) || die "$record_file is not a JSON object"
-  record_fields=$(json_fields "$record_json" '[.version, .address, .pemSha256]')
-  IFS=$TAB read -r recorded_version recorded_address recorded_sha <<EOT
-$record_fields
-EOT
+  recorded_version=$(json_field "$record_json" .version)
+  recorded_address=$(json_field "$record_json" .address)
 }
 
 # A filtered list returns empty when the resource is absent, instead of an error.
@@ -235,8 +217,4 @@ derive_address() {
   derive_hash=$(cast keccak "0x$derive_xy")
   derive_lower=0x$(printf '%s' "$derive_hash" | tail -c 40)
   cast to-check-sum-address "$derive_lower"
-}
-
-sha256_file() {
-  openssl dgst -sha256 -r "$1" | cut -d' ' -f1
 }

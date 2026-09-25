@@ -6,7 +6,7 @@ Two GCP projects. The key project holds one key ring and one key, administered b
 
 ## Prerequisites
 
-`gcloud` 470 or newer, `jq`, `openssl`, and `cast` from [Foundry](https://getfoundry.sh).
+`gcloud`, `jq`, `openssl`, and `cast` from [Foundry](https://getfoundry.sh).
 
 | Script | Needs |
 |---|---|

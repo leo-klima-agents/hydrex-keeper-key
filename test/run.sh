@@ -94,5 +94,11 @@ golden_case check-ok existing with-keeper "$fixtures/record" check.sh
 golden_case check-extra-binding extra-binding with-keeper "$fixtures/record" check.sh
 golden_case check-two-versions two-versions with-keeper "$fixtures/record" check.sh
 
+# A committed keeper.pem for another key fails the record check and skips the address check.
+mkdir "$tmp/record-other-pem"
+cp "$fixtures/record/keeper.json" "$tmp/record-other-pem/"
+openssl ecparam -name secp256k1 -genkey -noout 2>/dev/null | openssl ec -pubout -out "$tmp/record-other-pem/keeper.pem" 2>/dev/null
+golden_case check-other-pem existing with-keeper "$tmp/record-other-pem" check.sh
+
 [ "$failures" -eq 0 ] || { printf '%s golden case(s) failed\n' "$failures"; exit 1; }
 printf 'all golden cases passed\n'

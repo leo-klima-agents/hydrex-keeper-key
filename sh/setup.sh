@@ -10,16 +10,9 @@ load_config
 make_tmp
 
 log "== 1/7 APIs"
-for service in $SERVICES; do
-  enabled=$(gcloud services list --enabled --project="$KEY_PROJECT" \
-    --filter="config.name=$service" --format="value(config.name)")
-  if [ "$enabled" = "$service" ]; then
-    log "$service enabled"
-  else
-    log "enabling $service"
-    gcloud services enable "$service" --project="$KEY_PROJECT"
-  fi
-done
+# A no-op for APIs already enabled. Word splitting is intended.
+# shellcheck disable=SC2086
+gcloud services enable $SERVICES --project="$KEY_PROJECT"
 
 log "== 2/7 key ring"
 ring=$(find_keyring)

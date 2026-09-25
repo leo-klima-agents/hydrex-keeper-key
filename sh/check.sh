@@ -21,8 +21,8 @@ ok() { log "ok: $*"; }
 # Record problems are reported; only the address comparison is skipped.
 record_ok=yes
 read_record
-if [ -z "$recorded_address" ] || [ -z "$recorded_version" ] || [ -z "$recorded_sha" ]; then
-  fail "record lacks address, version or pemSha256"
+if [ -z "$recorded_address" ] || [ -z "$recorded_version" ]; then
+  fail "record lacks address or version"
   record_ok=no
 elif [ "$recorded_version" != "$KEY_VERSION_NAME" ]; then
   fail "record is for $recorded_version, config is $KEY_VERSION_NAME"
@@ -30,8 +30,11 @@ elif [ "$recorded_version" != "$KEY_VERSION_NAME" ]; then
 elif [ ! -f "$RECORD_DIR/keeper.pem" ]; then
   fail "$RECORD_DIR/keeper.pem missing; run address.sh"
   record_ok=no
-elif [ "$(sha256_file "$RECORD_DIR/keeper.pem")" != "$recorded_sha" ]; then
-  fail "keeper.pem does not match pemSha256"
+elif ! record_pem_address=$(derive_address "$RECORD_DIR/keeper.pem"); then
+  fail "keeper.pem is not a secp256k1 public key"
+  record_ok=no
+elif [ "$record_pem_address" != "$recorded_address" ]; then
+  fail "keeper.pem derives to $record_pem_address, record says $recorded_address"
   record_ok=no
 else
   ok "record is consistent"
@@ -86,7 +89,6 @@ if [ "$record_ok" = yes ] && [ "$version_state" = "ENABLED" ] && [ "$version_ok"
   live_address=$(derive_address "$pem")
   if [ "$live_address" = "$recorded_address" ]; then
     ok "live public key derives to $recorded_address"
-    [ "$(sha256_file "$pem")" = "$recorded_sha" ] || log "note: PEM bytes differ from record; run address.sh to refresh"
   else
     fail "live public key derives to $live_address, record says $recorded_address"
   fi

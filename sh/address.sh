@@ -26,20 +26,13 @@ describe_version_1
 pem=$TMP/keeper.pem
 gcloud kms keys versions get-public-key "$KEY_VERSION_NAME" --output-file="$pem"
 address=$(derive_address "$pem")
-pem_sha=$(sha256_file "$pem")
 
+# Rewriting a matching record leaves the same bytes, so git sees no change.
 if [ -f "$RECORD_DIR/keeper.json" ] && [ "$force" = no ]; then
   read_record
   if [ "$recorded_version" != "$KEY_VERSION_NAME" ] || [ "$recorded_address" != "$address" ]; then
     die "record has $recorded_address for $recorded_version; live key is $address for $KEY_VERSION_NAME. A new key means a new module; --force to overwrite"
   fi
-  if [ -f "$RECORD_DIR/keeper.pem" ] && [ "$recorded_sha" = "$pem_sha" ] &&
-    [ "$(sha256_file "$RECORD_DIR/keeper.pem")" = "$pem_sha" ]; then
-    log "record matches; nothing written"
-    printf '%s\n' "$address"
-    exit 0
-  fi
-  log "refreshing keeper.pem and pemSha256"
 fi
 
 # Staged next to the record so the rename stays on one filesystem. JSON last.
@@ -50,8 +43,7 @@ jq -n \
   --arg algorithm "$version_algorithm" \
   --arg protectionLevel "$version_protection" \
   --arg address "$address" \
-  --arg pemSha256 "$pem_sha" \
-  '{key: $key, version: $version, algorithm: $algorithm, protectionLevel: $protectionLevel, address: $address, pemSha256: $pemSha256}' \
+  '{key: $key, version: $version, algorithm: $algorithm, protectionLevel: $protectionLevel, address: $address}' \
   >"$RECORD_DIR/.keeper.json.tmp"
 cp "$pem" "$RECORD_DIR/.keeper.pem.tmp"
 mv "$RECORD_DIR/.keeper.pem.tmp" "$RECORD_DIR/keeper.pem"

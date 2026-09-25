@@ -6,10 +6,10 @@ set -eu
 
 : "${FAKE_GCLOUD_LOG:?}" "${FAKE_GCLOUD_SCENARIO:?}" "${FAKE_ADMIN_MEMBER:?}" "${FAKE_KEEPER_SA:?}"
 
-api_enabled=yes ring_exists=yes key_exists=yes key_policy=full project_audit=yes
+ring_exists=yes key_exists=yes key_policy=full project_audit=yes
 orgpolicy=enforced versions=one version_state=ENABLED warn=no
 case "$FAKE_GCLOUD_SCENARIO" in
-  fresh) api_enabled=no ring_exists=no key_exists=no key_policy=none project_audit=no
+  fresh) ring_exists=no key_exists=no key_policy=none project_audit=no
     orgpolicy=unset version_state=PENDING_GENERATION ;;
   existing) ;;
   foreign-key) key_exists=foreign ;;
@@ -96,12 +96,6 @@ log_set_policy() { # EXPECTED_ETAG ARGS...
 }
 
 case "$*" in
-  "version --format=json")
-    log_call "$@"
-    printf '{"Google Cloud SDK":"500.0.0"}\n' ;;
-  "services list --enabled "*)
-    log_call "$@"
-    [ "$api_enabled" = no ] || printf '%s\n' "${filter#config.name=}" ;;
   "services enable "*)
     log_call "$@" ;;
   "kms keyrings list "*)
