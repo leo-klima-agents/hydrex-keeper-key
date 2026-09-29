@@ -5,7 +5,8 @@ script_dir=$(dirname -- "$0")
 # shellcheck source=sh/lib.sh
 . "$script_dir/lib.sh"
 
-require_tools
+[ $# -eq 0 ] || die "usage: ${0##*/}"
+require_tools gcloud jq
 load_config
 make_tmp
 

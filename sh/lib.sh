@@ -31,10 +31,9 @@ make_tmp() {
   trap 'exit 143' TERM
 }
 
-# require_tools [EXTRA...]: gcloud and jq, plus any named extras.
-# shellcheck disable=SC2120
+# require_tools TOOL...: dies unless every TOOL is on PATH.
 require_tools() {
-  for tool in gcloud jq "$@"; do
+  for tool in "$@"; do
     command -v "$tool" >/dev/null 2>&1 || die "$tool not found on PATH"
   done
 }

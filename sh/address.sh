@@ -7,14 +7,14 @@ script_dir=$(dirname -- "$0")
 . "$script_dir/lib.sh"
 
 force=no
-[ $# -le 1 ] || die "usage: $0 [--force]"
-case "${1:-}" in
-  "") ;;
-  --force) force=yes ;;
-  *) die "usage: $0 [--force]" ;;
-esac
+for arg in "$@"; do
+  case "$arg" in
+    --force) force=yes ;;
+    *) die "usage: ${0##*/} [--force]" ;;
+  esac
+done
 
-require_tools openssl
+require_tools gcloud jq openssl
 require_keccak
 load_config
 make_tmp
