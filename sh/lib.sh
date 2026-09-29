@@ -156,7 +156,7 @@ policy_differs() {
 show_policy_diff() {
   printf '%s\n' "$desired_norm" >"$TMP/expected.json"
   printf '%s\n' "$live_norm" >"$TMP/live.json"
-  diff -u "$TMP/expected.json" "$TMP/live.json" >&2 || true
+  diff -u "$TMP/expected.json" "$TMP/live.json" | tail -n +3 >&2 || true
 }
 
 # get_iam RESOURCE gcloud-subcommand...
