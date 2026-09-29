@@ -215,7 +215,7 @@ derive_address() {
   [ ${#derive_hex} -eq 176 ] || die "unexpected DER length"
   derive_lower=$(tail -c 64 "$derive_der" | keccak256_hex | tail -c 40)
   derive_mask=$(printf '%s' "$derive_lower" | keccak256_hex)
-  [ ${#derive_lower} -eq 40 ] && [ ${#derive_mask} -eq 64 ] || die "Keccak-256 failed"
+  if [ ${#derive_lower} -ne 40 ] || [ ${#derive_mask} -ne 64 ]; then die "Keccak-256 failed"; fi
   awk -v a="$derive_lower" -v h="$derive_mask" 'BEGIN {
     printf "0x"
     for (i = 1; i <= 40; i++) { c = substr(a, i, 1); printf "%s", (c ~ /[a-f]/ && index("89abcdef", substr(h, i, 1))) ? toupper(c) : c }
