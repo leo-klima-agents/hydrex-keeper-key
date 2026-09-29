@@ -1,5 +1,5 @@
 #!/bin/sh
-# Sourced by every script in sh/.
+# Sourced by the scripts in sh/.
 # shellcheck disable=SC2034
 
 # cloudresourcemanager: the project IAM policy, which carries the audit config.
@@ -13,8 +13,8 @@ KEY_ALGORITHM=ec-sign-secp256k1-sha256
 KEY_ALGORITHM_API=EC_SIGN_SECP256K1_SHA256
 KEY_PROTECTION=hsm
 KEY_PROTECTION_API=HSM
-DESTROY_WINDOW=120d          # API maximum; immutable after create
-DESTROY_WINDOW_API=10368000s # 120 days in seconds
+DESTROY_WINDOW=120d          # the longest KMS allows; fixed at creation
+DESTROY_WINDOW_API=10368000s # 120 days, as the API reports it
 
 REPO_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 POLICY_DIR=$REPO_ROOT/policy
@@ -196,7 +196,7 @@ read_version_attrs() {
   version_protection=$(json_field "$1" .protectionLevel)
 }
 
-# Sets recorded_version, recorded_address from record/keeper.json.
+# read_record: sets recorded_version and recorded_address from record/keeper.json.
 read_record() {
   record_file=$RECORD_DIR/keeper.json
   [ -f "$record_file" ] || die "$record_file missing; run address.sh"
@@ -240,7 +240,8 @@ keccak256_hex() {
   openssl dgst -KECCAK-256 -binary | od -An -v -tx1 | tr -d ' \n'
 }
 
-# derive_address PEM: DER, last 64 bytes (X||Y), keccak256, last 20 bytes, EIP-55 checksum.
+# derive_address PEM: the Ethereum address of the secp256k1 public key in PEM: the last 20 bytes of the Keccak-256 of
+# its X and Y coordinates, in EIP-55 mixed case.
 SECP256K1_SPKI_PREFIX=3056301006072a8648ce3d020106052b8104000a03420004
 
 derive_address() {

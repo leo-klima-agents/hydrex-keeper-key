@@ -1,127 +1,49 @@
 # hydrex-keeper-key
 
-The Hydrex keeper is a service that casts one on-chain vote a week through `hydrex-conduit-executor`, a Safe module that
-accepts transactions from a single fixed Ethereum address, its `KEEPER`. This repo creates the key behind that address
-in Google Cloud KMS, records the address so the module can be deployed with it, grants the keeper service the right to
-sign with the key, and checks that nothing has drifted since. The private key never leaves the HSM; this repo holds only
-public material.
+The Cloud KMS key that signs the weekly Hydrex vote of the Klima "Carbon Impact" conduit. Its Ethereum address is the
+`KEEPER` of the Safe module in [hydrex-conduit-executor](https://github.com/ldeso/hydrex-conduit-executor), and
+[hydrex-keeper](https://github.com/ldeso/hydrex-keeper) signs with it from a Cloud Run job. The private key never leaves
+the HSM. This repository holds only public material: the scripts in `sh/`, the IAM policy and audit config in `policy/`
+that they write in full, and the public key and address in `record/`.
 
-Two GCP projects. The key project holds one key ring and one key, administered by one person or a small group,
-`ADMIN_MEMBER`. The keeper project holds the keeper service, a Cloud Run job, and receives one grant: signer on the key.
-IAM on the key is always written in full from `policy/key.iam.json.tmpl`; nothing is ever added to what is there.
+`KEY_PROJECT` holds one key ring and one key, administered by `ADMIN_MEMBER`, a person or a small group.
+`KEEPER_PROJECT` holds the keeper, whose service account `KEEPER_SA` is the key's only signer.
 
-## Prerequisites
+## Setup
 
-`gcloud`, `jq`, and `openssl` 3.2 or newer.
+Needs `gcloud`, `jq` and OpenSSL 3.2 or newer. `sh/setup.sh` needs `roles/owner` on the key project; the other scripts
+run as `ADMIN_MEMBER`, with `roles/iam.serviceAccountViewer` on `KEEPER_SA` for `sh/grant.sh` and `sh/check.sh`. Every
+script is safe to re-run.
 
-| Script                 | Needs                                                                 |
-| ---------------------- | --------------------------------------------------------------------- |
-| `setup.sh`             | `roles/owner` on the key project                                      |
-| `address.sh`           | being `ADMIN_MEMBER`, or a member of it if it is a group              |
-| `grant.sh`, `check.sh` | as above, plus `roles/iam.serviceAccountViewer` on the keeper project |
+1. **Configure.** `cp config.env.example config.env`, then fill in `KEY_PROJECT`, `KEEPER_PROJECT` and `ADMIN_MEMBER`.
+2. **Create the key.** `sh/setup.sh` enables the APIs, creates the key ring and the key (asymmetric signing, secp256k1,
+   HSM, 120-day destroy window), writes the key's IAM policy and turns on the KMS audit logs. A key of another kind
+   under the same name is refused.
+3. **Record the address.** `sh/address.sh` writes `record/`; commit it. A record for another key or address is kept
+   unless `--force`. `address` is the module's `KEEPER` and cannot change there, so a new key means a new module.
+4. **Grant the keeper.** Once hydrex-keeper's `sh/setup.sh` has printed the keeper's service account, set `KEEPER_SA`
+   and run `sh/grant.sh`.
+5. **Check for drift.** `sh/check.sh` compares the key, its IAM policy, the audit config and `KEEPER_SA` with
+   `config.env`, `policy/` and `record/`, read-only: one version, enabled, deriving to the recorded address; no
+   user-managed key of `KEEPER_SA`; nobody able to act as it.
 
-## 1. Configure
+The `check` workflow runs `sh/check.sh` every Friday and on demand, as a read-only service account in the key project
+(`roles/cloudkms.viewer` on the key ring, `roles/iam.securityReviewer` on the project, `roles/iam.serviceAccountViewer`
+on `KEEPER_SA`) reached by Workload Identity Federation through the `WIF_PROVIDER` and `CI_SERVICE_ACCOUNT` repository
+variables. It builds `config.env` from the repository variables named in `config.env.example`.
 
-```sh
-cp config.env.example config.env
-```
-
-Fill in every value. `ADMIN_MEMBER` is `user:EMAIL` for one admin or `group:EMAIL` for a Google group. Leave
-`KEEPER_SA`, the keeper service's service account (SA) email, empty until that account exists in the keeper project.
-
-Location defaults to `us`. One signature a week makes latency irrelevant; multi-region gives availability. Changing it
-later changes the resource names and the record, so choose once.
-
-## 2. Create the key project resources
-
-```sh
-sh/setup.sh
-```
-
-Enables the KMS API, creates the key ring and the key (asymmetric signing, secp256k1, HSM, 120-day destroy window),
-writes the key IAM policy, and turns on KMS Data Access audit logs. Safe to re-run; a second run changes nothing. An
-existing key with different attributes is refused.
-
-Confirm in the console: one ring, one key, one version, HSM, secp256k1, 120 days, only `ADMIN_MEMBER` on the key, all
-three KMS audit log types on.
-
-## 3. Record the address
-
-```sh
-sh/address.sh
-git add record/ && git commit -m "record: keeper key version 1"
-```
-
-Writes `record/keeper.pem` and `record/keeper.json`. Re-running against the same key changes nothing. If the record
-names a different key or address it refuses; `--force` overrides, which is only right when a new key and a new module
-are intended.
-
-To verify the address without the script:
-
-```sh
-openssl pkey -pubin -in record/keeper.pem -outform DER -out keeper.der
-tail -c 64 keeper.der | openssl dgst -KECCAK-256 | tail -c 41
-```
-
-## 4. Deploy the module
-
-`address` in `record/keeper.json` is the `KEEPER` of `hydrex-conduit-executor`. It is immutable in the module, so a new
-key means a new module. Have the module's deploy script read the address from a copy of `record/keeper.json` rather than
-paste it.
-
-## 5. Grant the keeper
-
-Once the keeper service's service account exists, set `KEEPER_SA` in `config.env` and run:
-
-```sh
-sh/grant.sh
-```
-
-Safe to re-run.
-
-## 6. Check for drift
-
-```sh
-sh/check.sh
-```
-
-Read-only. Fails if the live key no longer derives to the recorded address, a second version exists, version 1 is not
-enabled, key attributes or destroy window changed, the key IAM policy differs from the template, the audit config is
-off, or `KEEPER_SA` has a user-managed key. Run it after each step above. After step 5, `KEEPER_SA` must be set in
-`config.env` or the grant reads as drift.
-
-CI runs it every Friday after the vote, and on demand from the Actions tab. One-time setup, done once by an admin:
-
-1. In the key project, create a service account for CI, say `ci-check@KEY_PROJECT.iam.gserviceaccount.com`. Grant it
-   `roles/cloudkms.viewer` on the key ring and `roles/iam.securityReviewer` on the project, and, once `KEEPER_SA`
-   exists, `roles/iam.serviceAccountViewer` on `KEEPER_SA`. It can read everything `check.sh` needs and write nothing.
-2. Create a Workload Identity Federation pool and an OIDC provider for GitHub
-   (`--issuer-uri=https://token.actions.githubusercontent.com`, attribute mapping
-   `google.subject=assertion.sub,attribute.repository=assertion.repository`, attribute condition restricting
-   `assertion.repository` to this repo). Grant the pool's principal set for this repo `roles/iam.workloadIdentityUser`
-   on the CI service account.
-3. Set repository variables (Settings, Secrets and variables, Actions, Variables): `KEY_PROJECT`, `KEEPER_PROJECT`,
-   `LOCATION`, `KEY_RING` and `KEY` (only if changed from the defaults), `ADMIN_MEMBER`, `KEEPER_SA` (empty until step
-   5), `WIF_PROVIDER` (the provider's full resource name) and `CI_SERVICE_ACCOUNT`. These are public material, not
-   secrets.
-4. Run the workflow once by hand and confirm the `check` job is green.
-
-## Outside the scripts
-
-1. Enforce hardware 2FA on the admin account, or on every member of the admin group.
-2. KMS audit logs land in `_Default`, which keeps 30 days. Sink them to a locked bucket with longer retention in a
-   project the admins do not own.
-3. Admins can schedule the key's destruction and cancel it within 120 days. Alert on `DestroyCryptoKeyVersion` and
-   `UpdateCryptoKeyVersion`.
-4. A project owner can always re-grant `cloudkms.admin`. The key project's owners must be `ADMIN_MEMBER` or fewer, with
-   no org-level owner reaching it. Nothing here can check this.
-5. `KEEPER_SA` can sign, so a downloadable key for it could sign from anywhere. Enforce
-   `iam.managed.disableServiceAccountKeyCreation` on the keeper project. `check.sh` only detects a user-managed key on
-   `KEEPER_SA`.
+Outside the scripts: hardware 2FA on `ADMIN_MEMBER`; no owner of the key project beyond `ADMIN_MEMBER`, since an owner
+can re-grant `cloudkms.admin`; the KMS audit logs sunk to a bucket the admins do not own, with an alert on
+`DestroyCryptoKeyVersion` and `UpdateCryptoKeyVersion`, since an admin has 120 days to cancel a scheduled destruction;
+and `iam.managed.disableServiceAccountKeyCreation` on the keeper project, since `check.sh` only detects keys.
 
 ## Development
 
-`test/run.sh` runs every script under `dash` against a fake `gcloud` and diffs the calls against `test/golden/`;
-`--update` regenerates after an intended change. CI runs `shellcheck -s sh`, `sh -n`, `reuse lint` and these tests on
-every push; the `dash` run catches bashisms. CI reads, never writes: the scheduled `check` job is the only one with GCP
-access, through a viewer-only service account. Actions are pinned by commit and updated by Dependabot.
+`npm ci` once, then `npm run format` before committing. `test/sh/golden.sh` runs the scripts under `dash` (or
+`$TEST_SH`) against a fake `gcloud` and compares the calls and output with `test/sh/golden/`; `--update` rewrites them.
+CI runs it with Prettier, `shellcheck` and `reuse lint` on every push, and Dependabot updates the pinned Actions and npm
+packages.
+
+## License
+
+MIT, REUSE compliant.

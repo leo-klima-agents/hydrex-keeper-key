@@ -1,6 +1,6 @@
 #!/bin/sh
-# address.sh [--force]: version 1 public key -> Ethereum address -> record/.
-# Refuses to overwrite a record for a different key or address unless --force.
+# Writes the public key of key version 1 and its Ethereum address to record/. A record for another key or address is
+# kept unless --force.
 set -eu
 script_dir=$(dirname -- "$0")
 # shellcheck source=sh/lib.sh
@@ -35,7 +35,7 @@ if [ -f "$RECORD_DIR/keeper.json" ] && [ "$force" = no ]; then
   fi
 fi
 
-# Staged next to the record so the rename stays on one filesystem. JSON last.
+# Written next to the record and renamed into place, the JSON last, so that a reader never sees a half-written record.
 mkdir -p "$RECORD_DIR"
 jq -n \
   --arg key "$KEY_NAME" \

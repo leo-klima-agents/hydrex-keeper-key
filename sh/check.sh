@@ -1,6 +1,6 @@
 #!/bin/sh
-# check.sh: live state vs record/ and the expected IAM. Read-only.
-# Runs every check; exits 1 if any failed.
+# Compares the live key and KEEPER_SA with config.env, policy/ and record/. Read-only; runs every check, exits 1 if any
+# failed.
 set -eu
 script_dir=$(dirname -- "$0")
 # shellcheck source=sh/lib.sh
@@ -32,7 +32,7 @@ expect_policy() {
   fi
 }
 
-# Record problems are reported; only the address comparison is skipped.
+# Record: a problem fails, and skips the comparison with the live address.
 record_ok=yes
 read_record
 if [ -z "$recorded_address" ] || [ -z "$recorded_version" ]; then

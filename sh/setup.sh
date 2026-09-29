@@ -1,5 +1,5 @@
 #!/bin/sh
-# Key project resources. Idempotent.
+# Creates the key ring, the HSM key, its IAM policy and the KMS audit logs in the key project. Idempotent.
 set -eu
 script_dir=$(dirname -- "$0")
 # shellcheck source=sh/lib.sh
@@ -37,9 +37,9 @@ else
   if [ "$purpose" != "$KEY_PURPOSE_API" ] || [ "$algorithm" != "$KEY_ALGORITHM_API" ] || [ "$protection" != "$KEY_PROTECTION_API" ]; then
     die "$KEY_NAME exists with purpose=$purpose algorithm=$algorithm protectionLevel=$protection; not adopting it"
   fi
-  # destroyScheduledDuration cannot be updated.
+  # The destroy window cannot be changed after creation.
   [ "$window" = "$DESTROY_WINDOW_API" ] ||
-    die "$KEY_NAME has destroy window ${window:-unset}, expected $DESTROY_WINDOW_API; immutable, use another KEY name"
+    die "$KEY_NAME has destroy window ${window:-unset}, expected $DESTROY_WINDOW_API; use another KEY name"
   log "exists: $KEY_NAME"
 fi
 
