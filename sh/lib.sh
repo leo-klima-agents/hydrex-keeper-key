@@ -71,14 +71,14 @@ load_config() {
   KEY_VERSION_NAME=$KEY_NAME/cryptoKeyVersions/1
 }
 
-# Renders policy/key.iam.json.tmpl. Bindings with an empty principal are dropped.
-render_key_policy() {
+# render_policy FILE: policy/FILE with the principals filled in. A binding whose principal is empty is dropped.
+render_policy() {
   jq --arg admin "$ADMIN_MEMBER" --arg keeper "$KEEPER_SA" '
     walk(if type == "string"
          then (split("${ADMIN_MEMBER}") | join($admin)) | (split("${KEEPER_SA}") | join($keeper))
          else . end)
     | .bindings |= map(.members |= map(select(endswith(":") | not)) | select(.members | length > 0))
-  ' "$POLICY_DIR/key.iam.json.tmpl"
+  ' "$POLICY_DIR/$1"
 }
 
 # json_field JSON FILTER: "" if null or absent.
@@ -89,6 +89,92 @@ json_field() {
 # require_json JSON LABEL: dies unless JSON parses.
 require_json() {
   printf '%s\n' "$1" | jq -e . >/dev/null 2>&1 || die "$2 is not JSON: $1"
+}
+
+# Canonical policy: sorted bindings, without etag and version.
+normalize_policy() {
+  jq -S '{
+    bindings: ((.bindings // [])
+      | map({role, members: ((.members // []) | sort)} + (if .condition then {condition} else {} end))
+      | sort_by([.role, ((.condition // {}) | tojson)]))
+  }'
+}
+
+# policy_differs LIVE DESIRED. Leaves live_norm and desired_norm set.
+policy_differs() {
+  live_norm=$(printf '%s\n' "$1" | normalize_policy)
+  desired_norm=$(printf '%s\n' "$2" | normalize_policy)
+  [ "$live_norm" != "$desired_norm" ]
+}
+
+# Prints the diff from the last policy_differs.
+show_policy_diff() {
+  printf '%s\n' "$desired_norm" >"$TMP/expected.json"
+  printf '%s\n' "$live_norm" >"$TMP/live.json"
+  diff -u "$TMP/expected.json" "$TMP/live.json" | tail -n +3 >&2 || true
+}
+
+# get_iam RESOURCE FLAGS gcloud-subcommand...: FLAGS is one word-split string, "" for none.
+get_iam() {
+  iam_resource=$1
+  iam_flags=$2
+  shift 2
+  # shellcheck disable=SC2086
+  iam_json=$(gcloud "$@" get-iam-policy $iam_flags "$iam_resource" --format=json) || die "cannot read IAM policy of $iam_resource"
+  require_json "$iam_json" "IAM policy of $iam_resource"
+  printf '%s\n' "$iam_json"
+}
+
+# set_iam RESOURCE FLAGS DESIRED gcloud-subcommand...: writes DESIRED in full, with the live etag, unless it matches.
+set_iam() {
+  set_iam_resource=$1
+  set_iam_flags=$2
+  set_iam_desired=$3
+  shift 3
+  set_iam_live=$(get_iam "$set_iam_resource" "$set_iam_flags" "$@")
+  if ! policy_differs "$set_iam_live" "$set_iam_desired"; then
+    log "iam: $set_iam_resource unchanged"
+    return 0
+  fi
+  set_iam_etag=$(printf '%s\n' "$set_iam_live" | jq -r '.etag // empty')
+  printf '%s\n' "$set_iam_desired" | jq --arg etag "$set_iam_etag" '.etag = $etag' >"$TMP/policy.json"
+  log "iam: writing $set_iam_resource"
+  # shellcheck disable=SC2086
+  gcloud "$@" set-iam-policy $set_iam_flags "$set_iam_resource" "$TMP/policy.json" >/dev/null
+}
+
+# Canonical audit configs: sorted, with sorted log types and exempted members.
+normalize_audit() {
+  jq -S '{
+    auditConfigs: ((.auditConfigs // [])
+      | map({service, auditLogConfigs: ((.auditLogConfigs // [])
+          | map({logType} + (if .exemptedMembers then {exemptedMembers: (.exemptedMembers | sort)} else {} end))
+          | sort_by(.logType))})
+      | sort_by(.service))
+  }'
+}
+
+# audit_differs LIVE: whether the KMS entry of project policy LIVE's audit configs differs from policy/audit.json.
+# Leaves live_norm and desired_norm set.
+audit_differs() {
+  live_norm=$(printf '%s\n' "$1" | jq --slurpfile audit "$POLICY_DIR/audit.json" \
+    '{auditConfigs: [.auditConfigs[]? | select(.service == $audit[0].service)]}' | normalize_audit)
+  desired_norm=$(jq '{auditConfigs: [.]}' "$POLICY_DIR/audit.json" | normalize_audit)
+  [ "$live_norm" != "$desired_norm" ]
+}
+
+# set_audit: writes policy/audit.json as the KMS audit config of KEY_PROJECT unless it matches. The rest of the
+# project policy, and its etag, are written back as read.
+set_audit() {
+  set_audit_live=$(get_iam "$KEY_PROJECT" "" projects)
+  if ! audit_differs "$set_audit_live"; then
+    log "audit: $KEY_PROJECT unchanged"
+    return 0
+  fi
+  printf '%s\n' "$set_audit_live" | jq --slurpfile audit "$POLICY_DIR/audit.json" \
+    '.auditConfigs = ((.auditConfigs // []) | map(select(.service != $audit[0].service))) + $audit' >"$TMP/policy.json"
+  log "audit: writing $KEY_PROJECT"
+  gcloud projects set-iam-policy "$KEY_PROJECT" "$TMP/policy.json" >/dev/null
 }
 
 # Sets purpose, algorithm, protection, window. True if the first three are as expected.
@@ -138,67 +224,6 @@ describe_version_1() {
   version_json=$(gcloud kms keys versions describe "$KEY_VERSION_NAME" --format=json) || die "cannot describe $KEY_VERSION_NAME"
   require_json "$version_json" "key version 1"
   read_version_attrs "$version_json" || die "version 1 is algorithm=$version_algorithm protectionLevel=$version_protection"
-}
-
-# Canonical policy: sorted bindings and audit configs, without etag and version.
-normalize_policy() {
-  jq -S '{
-    bindings: ((.bindings // [])
-      | map({role, members: ((.members // []) | sort)} + (if .condition then {condition} else {} end))
-      | sort_by([.role, ((.condition // {}) | tojson)])),
-    auditConfigs: ((.auditConfigs // [])
-      | map({service, auditLogConfigs: ((.auditLogConfigs // [])
-          | map({logType} + (if .exemptedMembers then {exemptedMembers: (.exemptedMembers | sort)} else {} end))
-          | sort_by(.logType))})
-      | sort_by(.service))
-  }'
-}
-
-# policy_differs LIVE DESIRED. Leaves live_norm and desired_norm set.
-policy_differs() {
-  live_norm=$(printf '%s\n' "$1" | normalize_policy)
-  desired_norm=$(printf '%s\n' "$2" | normalize_policy)
-  [ "$live_norm" != "$desired_norm" ]
-}
-
-# Prints the diff from the last policy_differs.
-show_policy_diff() {
-  printf '%s\n' "$desired_norm" >"$TMP/expected.json"
-  printf '%s\n' "$live_norm" >"$TMP/live.json"
-  diff -u "$TMP/expected.json" "$TMP/live.json" | tail -n +3 >&2 || true
-}
-
-# get_iam RESOURCE gcloud-subcommand...
-get_iam() {
-  iam_resource=$1
-  shift
-  gcloud "$@" get-iam-policy "$iam_resource" --format=json
-}
-
-# write_iam_if_changed RESOURCE LIVE DESIRED gcloud-subcommand...: writes DESIRED in full with LIVE's etag.
-write_iam_if_changed() {
-  iam_resource=$1
-  iam_live=$2
-  iam_desired=$3
-  shift 3
-  if ! policy_differs "$iam_live" "$iam_desired"; then
-    log "iam: $iam_resource unchanged"
-    return 0
-  fi
-  iam_etag=$(printf '%s\n' "$iam_live" | jq -r '.etag // empty')
-  iam_file=$TMP/policy.json
-  printf '%s\n' "$iam_desired" | jq --arg etag "$iam_etag" '.etag = $etag' >"$iam_file"
-  log "iam: writing $iam_resource"
-  gcloud "$@" set-iam-policy "$iam_resource" "$iam_file" >/dev/null
-}
-
-# set_iam_authoritative RESOURCE DESIRED gcloud-subcommand...
-set_iam_authoritative() {
-  set_iam_resource=$1
-  set_iam_desired=$2
-  shift 2
-  set_iam_live=$(get_iam "$set_iam_resource" "$@")
-  write_iam_if_changed "$set_iam_resource" "$set_iam_live" "$set_iam_desired" "$@"
 }
 
 require_keccak() {

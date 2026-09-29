@@ -16,7 +16,7 @@ exists: projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryp
 == 4/6 key IAM
 iam: writing projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1
 == 5/6 audit logs
-iam: writing hydrex-keeper-key-test
+audit: writing hydrex-keeper-key-test
 == 6/6 key version
 state: ENABLED
 projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1/cryptoKeyVersions/1

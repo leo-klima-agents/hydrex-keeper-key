@@ -99,8 +99,8 @@ else
 fi
 
 # Key IAM
-live_policy=$(get_iam "$KEY_NAME" kms keys)
-expected_policy=$(render_key_policy)
+live_policy=$(get_iam "$KEY_NAME" "" kms keys)
+expected_policy=$(render_policy key.iam.json.tmpl)
 if policy_differs "$live_policy" "$expected_policy"; then
   fail "key IAM policy differs from template"
   show_policy_diff
@@ -109,12 +109,8 @@ else
 fi
 
 # Audit config
-project_policy=$(get_iam "$KEY_PROJECT" projects)
-live_audit=$(printf '%s\n' "$project_policy" |
-  jq -c --slurpfile audit "$POLICY_DIR/audit.json" \
-    '{auditConfigs: ((.auditConfigs // []) | map(select(.service == $audit[0].service)))}')
-expected_audit=$(jq -c '{auditConfigs: [.]}' "$POLICY_DIR/audit.json")
-if policy_differs "$live_audit" "$expected_audit"; then
+project_policy=$(get_iam "$KEY_PROJECT" "" projects)
+if audit_differs "$project_policy"; then
   fail "audit config for $KMS_SERVICE differs from policy/audit.json"
   show_policy_diff
 else

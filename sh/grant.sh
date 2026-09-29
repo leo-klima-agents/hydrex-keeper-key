@@ -15,5 +15,5 @@ make_tmp
 gcloud iam service-accounts describe "$KEEPER_SA" --project="$KEEPER_PROJECT" --format="value(email)" >/dev/null ||
   die "$KEEPER_SA not found in $KEEPER_PROJECT"
 
-key_policy=$(render_key_policy)
-set_iam_authoritative "$KEY_NAME" "$key_policy" kms keys
+key_policy=$(render_policy key.iam.json.tmpl)
+set_iam "$KEY_NAME" "" "$key_policy" kms keys

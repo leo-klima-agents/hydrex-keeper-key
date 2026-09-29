@@ -14,7 +14,7 @@ ok: version 1 is EC_SIGN_SECP256K1_SHA256 HSM
 ok: version 1 is ENABLED
 ok: live public key derives to 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf
 FAIL: key IAM policy differs from template
-@@ -18,6 +18,12 @@
+@@ -17,6 +17,12 @@
          "serviceAccount:hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com"
        ],
        "role": "roles/cloudkms.signer"

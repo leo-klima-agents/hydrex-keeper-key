@@ -42,15 +42,11 @@ fi
 
 log "== 4/6 key IAM"
 [ -n "$KEEPER_SA" ] || log "KEEPER_SA empty: admin only"
-key_policy=$(render_key_policy)
-set_iam_authoritative "$KEY_NAME" "$key_policy" kms keys
+key_policy=$(render_policy key.iam.json.tmpl)
+set_iam "$KEY_NAME" "" "$key_policy" kms keys
 
-# Project bindings are kept; only the KMS audit entry is replaced.
 log "== 5/6 audit logs"
-project_policy=$(get_iam "$KEY_PROJECT" projects)
-desired=$(printf '%s\n' "$project_policy" | jq --slurpfile audit "$POLICY_DIR/audit.json" \
-  '.auditConfigs = ((.auditConfigs // []) | map(select(.service != $audit[0].service))) + $audit')
-write_iam_if_changed "$KEY_PROJECT" "$project_policy" "$desired" projects
+set_audit
 
 log "== 6/6 key version"
 describe_version_1
