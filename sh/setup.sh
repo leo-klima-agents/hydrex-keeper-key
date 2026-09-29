@@ -32,8 +32,10 @@ if [ -z "$key" ]; then
     --protection-level="$KEY_PROTECTION" \
     --destroy-scheduled-duration="$DESTROY_WINDOW"
 else
-  read_key_attrs "$key" ||
+  read_key_attrs "$key"
+  if [ "$purpose" != "$KEY_PURPOSE_API" ] || [ "$algorithm" != "$KEY_ALGORITHM_API" ] || [ "$protection" != "$KEY_PROTECTION_API" ]; then
     die "$KEY_NAME exists with purpose=$purpose algorithm=$algorithm protectionLevel=$protection; not adopting it"
+  fi
   # destroyScheduledDuration cannot be updated.
   [ "$window" = "$DESTROY_WINDOW_API" ] ||
     die "$KEY_NAME has destroy window ${window:-unset}, expected $DESTROY_WINDOW_API; immutable, use another KEY name"

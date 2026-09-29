@@ -177,21 +177,19 @@ set_audit() {
   gcloud projects set-iam-policy "$KEY_PROJECT" "$TMP/policy.json" >/dev/null
 }
 
-# Sets purpose, algorithm, protection, window. True if the first three are as expected.
+# read_key_attrs KEY: sets purpose, algorithm, protection and window from the key's JSON.
 read_key_attrs() {
   purpose=$(json_field "$1" .purpose)
   algorithm=$(json_field "$1" .versionTemplate.algorithm)
   protection=$(json_field "$1" .versionTemplate.protectionLevel)
   window=$(json_field "$1" .destroyScheduledDuration)
-  [ "$purpose" = "$KEY_PURPOSE_API" ] && [ "$algorithm" = "$KEY_ALGORITHM_API" ] && [ "$protection" = "$KEY_PROTECTION_API" ]
 }
 
-# Sets version_state, version_algorithm, version_protection. True if the last two are as expected.
+# read_version_attrs VERSION: sets version_state, version_algorithm and version_protection from the version's JSON.
 read_version_attrs() {
   version_state=$(json_field "$1" .state)
   version_algorithm=$(json_field "$1" .algorithm)
   version_protection=$(json_field "$1" .protectionLevel)
-  [ "$version_algorithm" = "$KEY_ALGORITHM_API" ] && [ "$version_protection" = "$KEY_PROTECTION_API" ]
 }
 
 # Sets recorded_version, recorded_address from record/keeper.json.
@@ -219,11 +217,14 @@ find_key() {
   printf '%s\n' "$keys" | jq -c --arg name "$KEY_NAME" 'first(.[] | select(.name == $name)) // empty'
 }
 
-# describe_version_1: read_version_attrs on the live version 1; dies unless it is the expected kind.
+# describe_version_1: read_version_attrs on the live version 1, which must be of the expected kind.
 describe_version_1() {
   version_json=$(gcloud kms keys versions describe "$KEY_VERSION_NAME" --format=json) || die "cannot describe $KEY_VERSION_NAME"
   require_json "$version_json" "key version 1"
-  read_version_attrs "$version_json" || die "version 1 is algorithm=$version_algorithm protectionLevel=$version_protection"
+  read_version_attrs "$version_json"
+  if [ "$version_algorithm" != "$KEY_ALGORITHM_API" ] || [ "$version_protection" != "$KEY_PROTECTION_API" ]; then
+    die "version 1 is algorithm=$version_algorithm protectionLevel=$version_protection"
+  fi
 }
 
 require_keccak() {

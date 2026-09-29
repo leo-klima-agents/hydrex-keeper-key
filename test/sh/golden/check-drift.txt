@@ -7,12 +7,15 @@ gcloud iam service-accounts keys list --iam-account=hydrex-keeper@hydrex-keeper-
 exit=1
 --- output ---
 ok: record is consistent
-ok: key is ASYMMETRIC_SIGN EC_SIGN_SECP256K1_SHA256 HSM
-ok: destroy window is 120d
-FAIL: 2 key versions: 1=ENABLED 2=ENABLED
-ok: version 1 is EC_SIGN_SECP256K1_SHA256 HSM
-ok: version 1 is ENABLED
-ok: live public key derives to 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf
+ok: key purpose is ASYMMETRIC_SIGN
+ok: key algorithm is EC_SIGN_SECP256K1_SHA256
+ok: key protection level is HSM
+ok: key destroy window is 10368000s
+FAIL: key versions is 1 2, expected 1
+ok: version 1 state is ENABLED
+ok: version 1 algorithm is EC_SIGN_SECP256K1_SHA256
+ok: version 1 protection level is HSM
+ok: address of version 1 is 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf
 FAIL: key IAM policy differs from template
 @@ -17,6 +17,12 @@
          "serviceAccount:hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com"
