@@ -1,0 +1,26 @@
+{
+  "name": "hydrex-keeper-key",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloud KMS key that signs the weekly Hydrex vote: its creation, its address on record and the keeper's grant",
+  "license": "MIT",
+  "engines": {
+    "node": "26"
+  },
+  "scripts": {
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "prettier": "3.9.9",
+    "prettier-plugin-sh": "0.20.2"
+  },
+  "prettier": {
+    "printWidth": 120,
+    "proseWrap": "always",
+    "plugins": [
+      "prettier-plugin-sh"
+    ],
+    "binaryNextLine": false,
+    "spaceRedirects": false
+  }
+}

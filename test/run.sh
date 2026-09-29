@@ -9,7 +9,10 @@ update=no
 case "$#:${1:-}" in
   0:) ;;
   1:--update) update=yes ;;
-  *) printf 'usage: %s [--update]\n' "$0" >&2; exit 2 ;;
+  *)
+    printf 'usage: %s [--update]\n' "$0" >&2
+    exit 2
+    ;;
 esac
 
 tmp=$(mktemp -d)
@@ -102,5 +105,8 @@ cp "$fixtures/record/keeper.json" "$tmp/record-other-pem/"
 openssl ecparam -name secp256k1 -genkey -noout 2>/dev/null | openssl ec -pubout -out "$tmp/record-other-pem/keeper.pem" 2>/dev/null
 golden_case check-other-pem existing with-keeper "$tmp/record-other-pem" check.sh
 
-[ "$failures" -eq 0 ] || { printf '%s golden case(s) failed\n' "$failures"; exit 1; }
+[ "$failures" -eq 0 ] || {
+  printf '%s golden case(s) failed\n' "$failures"
+  exit 1
+}
 printf 'all golden cases passed\n'

@@ -9,8 +9,10 @@ set -eu
 ring_exists=yes key_exists=yes key_policy=full project_audit=yes
 versions=one version_state=ENABLED sa_key=no warn=no
 case "$FAKE_GCLOUD_SCENARIO" in
-  fresh) ring_exists=no key_exists=no key_policy=none project_audit=no
-    version_state=PENDING_GENERATION ;;
+  fresh)
+    ring_exists=no key_exists=no key_policy=none project_audit=no
+    version_state=PENDING_GENERATION
+    ;;
   existing) ;;
   foreign-key) key_exists=foreign ;;
   admin-only) key_policy='admin' ;;
@@ -18,7 +20,10 @@ case "$FAKE_GCLOUD_SCENARIO" in
   two-versions) versions=two ;;
   sa-key) sa_key=yes ;;
   warn) warn=yes ;; # gcloud prints a warning on stderr
-  *) printf 'fake-gcloud: unknown scenario %s\n' "$FAKE_GCLOUD_SCENARIO" >&2; exit 98 ;;
+  *)
+    printf 'fake-gcloud: unknown scenario %s\n' "$FAKE_GCLOUD_SCENARIO" >&2
+    exit 98
+    ;;
 esac
 
 # Public key of secp256k1 private key 1.
@@ -90,34 +95,48 @@ log_set_policy() { # EXPECTED_ETAG ARGS...
   shift
   file=$(eval "printf '%s' \"\$$#\"")
   [ "$(jq -r '.etag // ""' "$file")" = "$expected_etag" ] ||
-    { printf 'fake-gcloud: etag %s, expected %s\n' "$(jq -r .etag "$file")" "$expected_etag" >&2; exit 96; }
+    {
+      printf 'fake-gcloud: etag %s, expected %s\n' "$(jq -r .etag "$file")" "$expected_etag" >&2
+      exit 96
+    }
   logged=''
-  while [ $# -gt 1 ]; do logged="$logged $1"; shift; done
+  while [ $# -gt 1 ]; do
+    logged="$logged $1"
+    shift
+  done
   log_call "${logged# } $(jq -c -S . "$file")"
 }
 
 case "$*" in
   "services enable "*)
-    log_call "$@" ;;
+    log_call "$@"
+    ;;
   "kms keyrings list "*)
     log_call "$@"
-    if [ "$ring_exists" = yes ]; then printf '[{"name":"%s"}]\n' "${filter#name=}"; else printf '[]\n'; fi ;;
+    if [ "$ring_exists" = yes ]; then printf '[{"name":"%s"}]\n' "${filter#name=}"; else printf '[]\n'; fi
+    ;;
   "kms keyrings create "*)
-    log_call "$@" ;;
+    log_call "$@"
+    ;;
   "kms keys list "*)
     log_call "$@"
-    if [ "$key_exists" = no ]; then printf '[]\n'; else printf '[%s]\n' "$(key_json "${filter#name=}")"; fi ;;
+    if [ "$key_exists" = no ]; then printf '[]\n'; else printf '[%s]\n' "$(key_json "${filter#name=}")"; fi
+    ;;
   "kms keys create "*)
-    log_call "$@" ;;
+    log_call "$@"
+    ;;
   "kms keys get-iam-policy "*)
     log_call "$@"
-    key_policy_json ;;
+    key_policy_json
+    ;;
   "kms keys set-iam-policy "*)
-    log_set_policy "$(key_policy_json | jq -r .etag)" "$@" ;;
+    log_set_policy "$(key_policy_json | jq -r .etag)" "$@"
+    ;;
   "kms keys versions describe "*)
     log_call "$@"
     version_json "$5" "$version_state"
-    printf '\n' ;;
+    printf '\n'
+    ;;
   "kms keys versions list "*)
     log_call "$@"
     v="projects/$project/locations/$location/keyRings/$keyring/cryptoKeys/$key/cryptoKeyVersions"
@@ -125,19 +144,23 @@ case "$*" in
       printf '[%s,%s]\n' "$(version_json "$v/1" ENABLED)" "$(version_json "$v/2" ENABLED)"
     else
       printf '[%s]\n' "$(version_json "$v/1" "$version_state")"
-    fi ;;
+    fi
+    ;;
   "kms keys versions get-public-key "*)
     logged=''
     for arg in "$@"; do
       case "$arg" in --output-file=*) logged="$logged --output-file=<file>" ;; *) logged="$logged $arg" ;; esac
     done
     log_call "${logged# }"
-    pem >"$output_file" ;;
+    pem >"$output_file"
+    ;;
   "projects get-iam-policy "*)
     log_call "$@"
-    project_policy_json ;;
+    project_policy_json
+    ;;
   "projects set-iam-policy "*)
-    log_set_policy "$(project_policy_json | jq -r .etag)" "$@" ;;
+    log_set_policy "$(project_policy_json | jq -r .etag)" "$@"
+    ;;
   "iam service-accounts keys list "*)
     log_call "$@"
     if [ "$sa_key" = yes ]; then
@@ -145,12 +168,15 @@ case "$*" in
       printf '[{"keyType":"USER_MANAGED","name":"projects/%s/serviceAccounts/%s/keys/0123abcd"}]\n' "${sa_project%%.*}" "$FAKE_KEEPER_SA"
     else
       printf '[]\n'
-    fi ;;
+    fi
+    ;;
   "iam service-accounts describe "*)
     log_call "$@"
-    printf '%s\n' "$4" ;;
+    printf '%s\n' "$4"
+    ;;
   *)
     log_call "UNEXPECTED:" "$@"
     printf 'fake-gcloud: unexpected call: gcloud %s\n' "$*" >&2
-    exit 99 ;;
+    exit 99
+    ;;
 esac
