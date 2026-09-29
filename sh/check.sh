@@ -110,11 +110,10 @@ else
     die "cannot list keys of $KEEPER_SA"
   require_json "$sa_keys" "key list of $KEEPER_SA"
   sa_key_ids=$(json_field "$sa_keys" '[.[].name | split("/") | last] | join(" ")')
-  if [ -z "$sa_key_ids" ]; then
-    ok "$KEEPER_SA has no user-managed keys"
-  else
-    fail "$KEEPER_SA has user-managed keys: $sa_key_ids"
-  fi
+  if [ -z "$sa_key_ids" ]; then ok "$KEEPER_SA has no user-managed keys"; else fail "$KEEPER_SA has user-managed keys: $sa_key_ids"; fi
+  sa_policy=$(get_iam "$KEEPER_SA" "--project=$KEEPER_PROJECT" iam service-accounts)
+  sa_bindings=$(json_field "$sa_policy" '[.bindings[]? | "\(.role):\(.members | join(","))"] | join(" ")')
+  if [ -z "$sa_bindings" ]; then ok "nobody can act as $KEEPER_SA"; else fail "$KEEPER_SA has IAM bindings: $sa_bindings"; fi
 fi
 
 [ "$failed" -ne 0 ] || log "all checks passed"

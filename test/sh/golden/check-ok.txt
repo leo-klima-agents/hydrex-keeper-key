@@ -4,6 +4,7 @@ gcloud kms keys versions get-public-key projects/hydrex-keeper-key-test/location
 gcloud kms keys get-iam-policy projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 --format=json
 gcloud projects get-iam-policy hydrex-keeper-key-test --format=json
 gcloud iam service-accounts keys list --iam-account=hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com --managed-by=user --format=json
+gcloud iam service-accounts get-iam-policy --project=hydrex-keeper-test hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com --format=json
 exit=0
 --- output ---
 ok: record is consistent
@@ -19,4 +20,5 @@ ok: address of version 1 is 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf
 ok: key IAM policy matches template
 ok: audit config for cloudkms.googleapis.com matches policy/audit.json
 ok: hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com has no user-managed keys
+ok: nobody can act as hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com
 all checks passed

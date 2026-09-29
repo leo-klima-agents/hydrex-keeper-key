@@ -4,6 +4,7 @@ gcloud kms keys versions get-public-key projects/hydrex-keeper-key-test/location
 gcloud kms keys get-iam-policy projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 --format=json
 gcloud projects get-iam-policy hydrex-keeper-key-test --format=json
 gcloud iam service-accounts keys list --iam-account=hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com --managed-by=user --format=json
+gcloud iam service-accounts get-iam-policy --project=hydrex-keeper-test hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com --format=json
 exit=1
 --- output ---
 ok: record is consistent
@@ -42,3 +43,4 @@ FAIL: audit config for cloudkms.googleapis.com differs from policy/audit.json
          }
        ],
 FAIL: hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com has user-managed keys: 0123abcd
+FAIL: hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com has IAM bindings: roles/iam.serviceAccountTokenCreator:user:stray@example.com
