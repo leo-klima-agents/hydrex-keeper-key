@@ -1,4 +1,4 @@
-gcloud services enable cloudkms.googleapis.com --project=hydrex-keeper-key-test
+gcloud services enable cloudkms.googleapis.com cloudresourcemanager.googleapis.com iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com --project=hydrex-keeper-key-test
 gcloud kms keyrings list --project=hydrex-keeper-key-test --location=us --format=json
 gcloud kms keyrings create projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper
 gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --format=json
@@ -10,7 +10,7 @@ gcloud projects set-iam-policy hydrex-keeper-key-test {"auditConfigs":[{"auditLo
 gcloud kms keys versions describe projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1/cryptoKeyVersions/1 --format=json
 exit=0
 --- output ---
-== 1/6 KMS API
+== 1/6 APIs
 == 2/6 key ring
 creating projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper
 == 3/6 key

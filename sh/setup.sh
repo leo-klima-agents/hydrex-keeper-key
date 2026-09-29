@@ -10,8 +10,9 @@ require_tools gcloud jq
 load_config
 make_tmp
 
-log "== 1/6 KMS API"
-gcloud services enable "$KMS_SERVICE" --project="$KEY_PROJECT"
+log "== 1/6 APIs"
+# shellcheck disable=SC2086
+gcloud services enable $SERVICES --project="$KEY_PROJECT"
 
 log "== 2/6 key ring"
 ring=$(find_keyring)

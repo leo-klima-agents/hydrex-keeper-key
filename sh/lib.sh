@@ -2,6 +2,10 @@
 # Sourced by every script in sh/.
 # shellcheck disable=SC2034
 
+# cloudresourcemanager: the project IAM policy, which carries the audit config.
+# iam, iamcredentials, sts: the CI service account and its Workload Identity Federation.
+SERVICES="cloudkms.googleapis.com cloudresourcemanager.googleapis.com iam.googleapis.com iamcredentials.googleapis.com
+sts.googleapis.com"
 KMS_SERVICE=cloudkms.googleapis.com
 KEY_PURPOSE=asymmetric-signing
 KEY_PURPOSE_API=ASYMMETRIC_SIGN
