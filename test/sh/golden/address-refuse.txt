@@ -1,0 +1,14 @@
+gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --filter=name=projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 --format=json
+gcloud kms keys versions describe projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1/cryptoKeyVersions/1 --format=json
+gcloud kms keys versions get-public-key projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1/cryptoKeyVersions/1 --output-file=<file>
+exit=1
+--- output ---
+error: record has 0x0000000000000000000000000000000000000001 for projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1/cryptoKeyVersions/1; live key is 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf for projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1/cryptoKeyVersions/1. A new key means a new module; --force to overwrite
+--- record/keeper.json ---
+{
+  "key": "projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1",
+  "version": "projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1/cryptoKeyVersions/1",
+  "algorithm": "EC_SIGN_SECP256K1_SHA256",
+  "protectionLevel": "HSM",
+  "address": "0x0000000000000000000000000000000000000001"
+}

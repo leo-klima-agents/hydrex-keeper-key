@@ -1,0 +1,17 @@
+gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --filter=name=projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 --format=json
+gcloud kms keys versions list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --key=hydrex-keeper-v1 --format=json
+gcloud kms keys get-iam-policy projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 --format=json
+gcloud projects get-iam-policy hydrex-keeper-key-test --format=json
+gcloud iam service-accounts keys list --iam-account=hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com --managed-by=user --format=json
+exit=1
+--- output ---
+ok: record is consistent
+FAIL: key is purpose=ASYMMETRIC_SIGN algorithm=EC_SIGN_P256_SHA256 protectionLevel=SOFTWARE
+FAIL: destroy window is 86400s, expected 10368000s
+ok: one key version, version 1
+FAIL: version 1 is algorithm=EC_SIGN_P256_SHA256 protectionLevel=SOFTWARE
+ok: version 1 is ENABLED
+skipping address check
+ok: key IAM policy matches template
+ok: audit config for cloudkms.googleapis.com matches policy/audit.json
+ok: hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com has no user-managed keys

@@ -1,0 +1,22 @@
+gcloud services enable cloudkms.googleapis.com --project=hydrex-keeper-key-test
+gcloud kms keyrings list --project=hydrex-keeper-key-test --location=us --filter=name=projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper --format=json
+gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --filter=name=projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 --format=json
+gcloud kms keys get-iam-policy projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 --format=json
+gcloud kms keys set-iam-policy projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 {"bindings":[{"members":["user:hydrex-key-admin@example.com"],"role":"roles/cloudkms.admin"},{"members":["serviceAccount:hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com"],"role":"roles/cloudkms.publicKeyViewer"},{"members":["serviceAccount:hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com"],"role":"roles/cloudkms.signer"}],"etag":"BwKeyStray"}
+gcloud projects get-iam-policy hydrex-keeper-key-test --format=json
+gcloud projects set-iam-policy hydrex-keeper-key-test {"auditConfigs":[{"auditLogConfigs":[{"logType":"ADMIN_READ"}],"service":"allServices"},{"auditLogConfigs":[{"logType":"ADMIN_READ"},{"logType":"DATA_READ"},{"logType":"DATA_WRITE"}],"service":"cloudkms.googleapis.com"}],"bindings":[{"members":["user:hydrex-key-admin@example.com"],"role":"roles/owner"}],"etag":"BwProjAudited","version":1}
+gcloud kms keys versions describe projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1/cryptoKeyVersions/1 --format=json
+exit=0
+--- output ---
+== 1/6 KMS API
+== 2/6 key ring
+exists: projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper
+== 3/6 key
+exists: projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1
+== 4/6 key IAM
+iam: writing projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1
+== 5/6 audit logs
+iam: writing hydrex-keeper-key-test
+== 6/6 key version
+state: ENABLED
+projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1/cryptoKeyVersions/1
