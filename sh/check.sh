@@ -57,10 +57,11 @@ fi
 
 # Versions: exactly one, version 1, ENABLED, expected algorithm and protection.
 versions=$(gcloud kms keys versions list --project="$KEY_PROJECT" --location="$LOCATION" \
-  --keyring="$KEY_RING" --key="$KEY" --format=json)
-count=$(printf '%s\n' "$versions" | jq 'length')
-listed=$(printf '%s\n' "$versions" | jq -r '[.[] | "\(.name | split("/") | last)=\(.state)"] | join(" ")')
-version1=$(printf '%s\n' "$versions" | jq -c --arg name "$KEY_VERSION_NAME" '.[] | select(.name == $name)')
+  --keyring="$KEY_RING" --key="$KEY" --format=json) || die "cannot list versions of $KEY_NAME"
+require_json "$versions" "version list of $KEY_NAME"
+count=$(json_field "$versions" length)
+listed=$(json_field "$versions" '[.[] | "\(.name | split("/") | last)=\(.state)"] | join(" ")')
+version1=$(printf '%s\n' "$versions" | jq -c --arg name "$KEY_VERSION_NAME" 'first(.[] | select(.name == $name)) // empty')
 version_state=missing version_ok=no
 if [ -z "$version1" ]; then
   fail "version 1 missing; present: ${listed:-none}"
@@ -125,7 +126,8 @@ if [ -z "$KEEPER_SA" ]; then
 else
   sa_keys=$(gcloud iam service-accounts keys list --iam-account="$KEEPER_SA" --managed-by=user --format=json) ||
     die "cannot list keys of $KEEPER_SA"
-  sa_key_ids=$(printf '%s\n' "$sa_keys" | jq -r '[.[].name | split("/") | last] | join(" ")')
+  require_json "$sa_keys" "key list of $KEEPER_SA"
+  sa_key_ids=$(json_field "$sa_keys" '[.[].name | split("/") | last] | join(" ")')
   if [ -z "$sa_key_ids" ]; then
     ok "$KEEPER_SA has no user-managed keys"
   else

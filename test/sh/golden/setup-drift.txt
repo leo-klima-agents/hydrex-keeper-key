@@ -1,6 +1,6 @@
 gcloud services enable cloudkms.googleapis.com --project=hydrex-keeper-key-test
-gcloud kms keyrings list --project=hydrex-keeper-key-test --location=us --filter=name=projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper --format=json
-gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --filter=name=projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 --format=json
+gcloud kms keyrings list --project=hydrex-keeper-key-test --location=us --format=json
+gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --format=json
 gcloud kms keys get-iam-policy projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 --format=json
 gcloud kms keys set-iam-policy projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 {"bindings":[{"members":["user:hydrex-key-admin@example.com"],"role":"roles/cloudkms.admin"},{"members":["serviceAccount:hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com"],"role":"roles/cloudkms.publicKeyViewer"},{"members":["serviceAccount:hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com"],"role":"roles/cloudkms.signer"}],"etag":"BwKeyStray"}
 gcloud projects get-iam-policy hydrex-keeper-key-test --format=json

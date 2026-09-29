@@ -86,6 +86,11 @@ json_field() {
   printf '%s\n' "$1" | jq -r "($2) // \"\"" || die "cannot parse JSON"
 }
 
+# require_json JSON LABEL: dies unless JSON parses.
+require_json() {
+  printf '%s\n' "$1" | jq -e . >/dev/null 2>&1 || die "$2 is not JSON: $1"
+}
+
 # Sets purpose, algorithm, protection, window. True if the first three are as expected.
 read_key_attrs() {
   purpose=$(json_field "$1" .purpose)
@@ -112,21 +117,26 @@ read_record() {
   recorded_address=$(json_field "$record_json" .address)
 }
 
-# A filtered list returns empty when the resource is absent, instead of an error.
+# A listing tells an absent key ring or key from a failed call, which describe would not.
+# find_keyring: KEY_RING_NAME if the key ring exists, else "".
 find_keyring() {
-  find_keyring_list=$(gcloud kms keyrings list --project="$KEY_PROJECT" --location="$LOCATION" \
-    --filter="name=$KEY_RING_NAME" --format=json)
-  printf '%s\n' "$find_keyring_list" | jq -r --arg name "$KEY_RING_NAME" '.[] | select(.name == $name) | .name'
+  rings=$(gcloud kms keyrings list --project="$KEY_PROJECT" --location="$LOCATION" --format=json) || die "cannot list key rings"
+  require_json "$rings" "key ring list"
+  printf '%s\n' "$rings" | jq -r --arg name "$KEY_RING_NAME" 'first(.[] | select(.name == $name) | .name) // ""'
 }
 
+# find_key: the key as JSON, or "".
 find_key() {
-  find_key_list=$(gcloud kms keys list --project="$KEY_PROJECT" --location="$LOCATION" --keyring="$KEY_RING" \
-    --filter="name=$KEY_NAME" --format=json)
-  printf '%s\n' "$find_key_list" | jq -c --arg name "$KEY_NAME" '.[] | select(.name == $name)'
+  keys=$(gcloud kms keys list --project="$KEY_PROJECT" --location="$LOCATION" --keyring="$KEY_RING" --format=json) ||
+    die "cannot list keys of $KEY_RING_NAME"
+  require_json "$keys" "key list"
+  printf '%s\n' "$keys" | jq -c --arg name "$KEY_NAME" 'first(.[] | select(.name == $name)) // empty'
 }
 
+# describe_version_1: read_version_attrs on the live version 1; dies unless it is the expected kind.
 describe_version_1() {
-  version_json=$(gcloud kms keys versions describe "$KEY_VERSION_NAME" --format=json)
+  version_json=$(gcloud kms keys versions describe "$KEY_VERSION_NAME" --format=json) || die "cannot describe $KEY_VERSION_NAME"
+  require_json "$version_json" "key version 1"
   read_version_attrs "$version_json" || die "version 1 is algorithm=$version_algorithm protectionLevel=$version_protection"
 }
 

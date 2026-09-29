@@ -1,4 +1,4 @@
-gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --filter=name=projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 --format=json
+gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --format=json
 gcloud kms keys versions list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --key=hydrex-keeper-v1 --format=json
 gcloud kms keys get-iam-policy projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 --format=json
 gcloud projects get-iam-policy hydrex-keeper-key-test --format=json

@@ -15,7 +15,7 @@ gcloud services enable "$KMS_SERVICE" --project="$KEY_PROJECT"
 
 log "== 2/6 key ring"
 ring=$(find_keyring)
-if [ "$ring" = "$KEY_RING_NAME" ]; then
+if [ -n "$ring" ]; then
   log "exists: $KEY_RING_NAME"
 else
   log "creating $KEY_RING_NAME"

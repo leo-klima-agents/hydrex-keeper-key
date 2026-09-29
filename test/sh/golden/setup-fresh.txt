@@ -1,7 +1,7 @@
 gcloud services enable cloudkms.googleapis.com --project=hydrex-keeper-key-test
-gcloud kms keyrings list --project=hydrex-keeper-key-test --location=us --filter=name=projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper --format=json
+gcloud kms keyrings list --project=hydrex-keeper-key-test --location=us --format=json
 gcloud kms keyrings create projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper
-gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --filter=name=projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 --format=json
+gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --format=json
 gcloud kms keys create projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 --purpose=asymmetric-signing --default-algorithm=ec-sign-secp256k1-sha256 --protection-level=hsm --destroy-scheduled-duration=120d
 gcloud kms keys get-iam-policy projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 --format=json
 gcloud kms keys set-iam-policy projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 {"bindings":[{"members":["user:hydrex-key-admin@example.com"],"role":"roles/cloudkms.admin"}],"etag":"ACAB"}
