@@ -79,7 +79,7 @@ load_config() {
   KEY_NAME=$KEY_RING_NAME/cryptoKeys/$KEY
   KEY_VERSION_NAME=$KEY_NAME/cryptoKeyVersions/1
   ALERT_NAME="$KEY_RING key ring changed"
-  # The Admin Activity audit log records every write under the key ring: keys, versions and IAM policies.
+  # Admin Activity audit logs record every write under the key ring: keys, versions and IAM policies.
   ALERT_FILTER="logName=\"projects/$KEY_PROJECT/logs/cloudaudit.googleapis.com%2Factivity\" AND protoPayload.serviceName=\"$KMS_SERVICE\" AND protoPayload.resourceName=~\"^$KEY_RING_NAME(/|\$)\""
 }
 
