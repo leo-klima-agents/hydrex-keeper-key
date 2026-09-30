@@ -5,6 +5,8 @@ gcloud kms keys get-iam-policy projects/hydrex-keeper-key-test/locations/us/keyR
 gcloud projects get-iam-policy hydrex-keeper-key-test --format=json
 gcloud iam service-accounts keys list --iam-account=hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com --managed-by=user --format=json
 gcloud iam service-accounts get-iam-policy --project=hydrex-keeper-test hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com --format=json
+gcloud beta monitoring channels list --project=hydrex-keeper-key-test --format=json
+gcloud monitoring policies list --project=hydrex-keeper-key-test --format=json
 exit=1
 --- output ---
 ok: record is consistent
@@ -44,3 +46,6 @@ FAIL: audit config for cloudkms.googleapis.com differs from policy/audit.json
        ],
 FAIL: hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com has user-managed keys: 0123abcd
 FAIL: hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com has IAM bindings: roles/iam.serviceAccountTokenCreator:user:stray@example.com
+FAIL: "hydrex-keeper key ring changed" enabled is false, expected true
+FAIL: "hydrex-keeper key ring changed" does not notify hydrex-admin@example.com
+FAIL: "hydrex-keeper key ring changed" filter is protoPayload.serviceName="cloudkms.googleapis.com", expected logName="projects/hydrex-keeper-key-test/logs/cloudaudit.googleapis.com%2Factivity" AND protoPayload.serviceName="cloudkms.googleapis.com" AND protoPayload.resourceName=~"^projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper(/|$)"

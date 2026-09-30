@@ -1,4 +1,4 @@
-gcloud services enable cloudkms.googleapis.com cloudresourcemanager.googleapis.com iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com --project=hydrex-keeper-key-test
+gcloud services enable cloudkms.googleapis.com cloudresourcemanager.googleapis.com iam.googleapis.com iamcredentials.googleapis.com logging.googleapis.com monitoring.googleapis.com sts.googleapis.com --project=hydrex-keeper-key-test
 gcloud kms keyrings list --project=hydrex-keeper-key-test --location=us --format=json
 gcloud kms keyrings create projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper
 gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --format=json
@@ -7,20 +7,27 @@ gcloud kms keys get-iam-policy projects/hydrex-keeper-key-test/locations/us/keyR
 gcloud kms keys set-iam-policy projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 {"bindings":[{"members":["user:hydrex-key-admin@example.com"],"role":"roles/cloudkms.admin"}],"etag":"ACAB"}
 gcloud projects get-iam-policy hydrex-keeper-key-test --format=json
 gcloud projects set-iam-policy hydrex-keeper-key-test {"auditConfigs":[{"auditLogConfigs":[{"logType":"ADMIN_READ"}],"service":"allServices"},{"auditLogConfigs":[{"logType":"ADMIN_READ"},{"logType":"DATA_READ"},{"logType":"DATA_WRITE"}],"service":"cloudkms.googleapis.com"}],"bindings":[{"members":["user:hydrex-key-admin@example.com"],"role":"roles/owner"}],"etag":"BwProjPlain","version":1}
+gcloud beta monitoring channels list --project=hydrex-keeper-key-test --format=json
+gcloud beta monitoring channels create --project=hydrex-keeper-key-test --display-name=hydrex-keeper alerts --type=email --channel-labels=email_address=hydrex-admin@example.com --format=value(name)
+gcloud monitoring policies list --project=hydrex-keeper-key-test --format=json
+gcloud monitoring policies create --project=hydrex-keeper-key-test {"alertStrategy":{"notificationRateLimit":{"period":"300s"}},"combiner":"OR","conditions":[{"conditionMatchedLog":{"filter":"logName=\"projects/hydrex-keeper-key-test/logs/cloudaudit.googleapis.com%2Factivity\" AND protoPayload.serviceName=\"cloudkms.googleapis.com\" AND protoPayload.resourceName=~\"^projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper(/|$)\""},"displayName":"admin activity under the key ring"}],"displayName":"hydrex-keeper key ring changed","documentation":{"content":"Something under projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper changed: a key, a key version or an IAM policy. Read the audit log entry; a scheduled destruction can be cancelled for 120 days.","mimeType":"text/markdown"},"notificationChannels":["projects/hydrex-keeper-key-test/notificationChannels/1234567890"]}
 gcloud kms keys versions describe projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1/cryptoKeyVersions/1 --format=json
 exit=0
 --- output ---
-== 1/6 APIs
-== 2/6 key ring
+== 1/7 APIs
+== 2/7 key ring
 creating projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper
-== 3/6 key
+== 3/7 key
 creating projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1
-== 4/6 key IAM
+== 4/7 key IAM
 KEEPER_SA empty: admin only
 iam: writing projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1
-== 5/6 audit logs
+== 5/7 audit logs
 audit: writing hydrex-keeper-key-test
-== 6/6 key version
+== 6/7 alert
+creating email channel for hydrex-admin@example.com
+creating alert policy: hydrex-keeper key ring changed
+== 7/7 key version
 state: PENDING_GENERATION
 run address.sh once ENABLED
 projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1/cryptoKeyVersions/1

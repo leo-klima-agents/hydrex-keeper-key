@@ -4,8 +4,9 @@
 
 # cloudresourcemanager: the project IAM policy, which carries the audit config.
 # iam, iamcredentials, sts: the CI service account and its Workload Identity Federation.
+# logging, monitoring: the alert on changes under the key ring.
 SERVICES="cloudkms.googleapis.com cloudresourcemanager.googleapis.com iam.googleapis.com iamcredentials.googleapis.com
-sts.googleapis.com"
+logging.googleapis.com monitoring.googleapis.com sts.googleapis.com"
 KMS_SERVICE=cloudkms.googleapis.com
 KEY_PURPOSE=asymmetric-signing
 KEY_PURPOSE_API=ASYMMETRIC_SIGN
@@ -45,7 +46,7 @@ require_tools() {
 load_config() {
   [ -f "$CONFIG_FILE" ] || die "$CONFIG_FILE missing; copy config.env.example"
   case "$CONFIG_FILE" in */*) ;; *) CONFIG_FILE=./$CONFIG_FILE ;; esac # else `.` searches PATH
-  unset KEY_PROJECT KEEPER_PROJECT LOCATION KEY_RING KEY ADMIN_MEMBER KEEPER_SA
+  unset KEY_PROJECT KEEPER_PROJECT LOCATION KEY_RING KEY ADMIN_MEMBER KEEPER_SA ALERT_EMAIL
   # shellcheck source=/dev/null
   . "$CONFIG_FILE"
   LOCATION=${LOCATION:-us}
@@ -53,7 +54,7 @@ load_config() {
   KEY=${KEY:-hydrex-keeper-v1}
   KEEPER_SA=${KEEPER_SA:-}
 
-  for required in KEY_PROJECT KEEPER_PROJECT ADMIN_MEMBER; do
+  for required in KEY_PROJECT KEEPER_PROJECT ADMIN_MEMBER ALERT_EMAIL; do
     eval "value=\${$required:-}"
     [ -n "$value" ] || die "$required is not set in $CONFIG_FILE"
   done
@@ -69,10 +70,17 @@ load_config() {
       *) die "KEEPER_SA must be a service account in $KEEPER_PROJECT" ;;
     esac
   fi
+  case "$ALERT_EMAIL" in
+    ?*@?*) ;;
+    *) die "ALERT_EMAIL must be an email address" ;;
+  esac
 
   KEY_RING_NAME=projects/$KEY_PROJECT/locations/$LOCATION/keyRings/$KEY_RING
   KEY_NAME=$KEY_RING_NAME/cryptoKeys/$KEY
   KEY_VERSION_NAME=$KEY_NAME/cryptoKeyVersions/1
+  ALERT_NAME="$KEY_RING key ring changed"
+  # The Admin Activity audit log records every write under the key ring: keys, versions and IAM policies.
+  ALERT_FILTER="logName=\"projects/$KEY_PROJECT/logs/cloudaudit.googleapis.com%2Factivity\" AND protoPayload.serviceName=\"$KMS_SERVICE\" AND protoPayload.resourceName=~\"^$KEY_RING_NAME(/|\$)\""
 }
 
 # render_policy FILE: policy/FILE with the principals filled in. A binding whose principal is empty is dropped.
@@ -145,6 +153,21 @@ set_iam() {
   log "iam: writing $set_iam_resource"
   # shellcheck disable=SC2086
   gcloud "$@" set-iam-policy $set_iam_flags "$set_iam_resource" "$TMP/policy.json" >/dev/null
+}
+
+# find_channel PROJECT: name of PROJECT's email notification channel for ALERT_EMAIL, or "".
+find_channel() {
+  channels=$(gcloud beta monitoring channels list --project="$1" --format=json) || die "cannot list notification channels"
+  require_json "$channels" "channel list"
+  printf '%s\n' "$channels" |
+    jq -r --arg email "$ALERT_EMAIL" 'first(.[] | select(.type == "email" and .labels.email_address == $email) | .name) // ""'
+}
+
+# find_alert PROJECT NAME: PROJECT's alert policy named NAME as JSON, or "".
+find_alert() {
+  alerts=$(gcloud monitoring policies list --project="$1" --format=json) || die "cannot list alert policies"
+  require_json "$alerts" "alert policy list"
+  printf '%s\n' "$alerts" | jq -c --arg name "$2" 'first(.[] | select(.displayName == $name)) // empty'
 }
 
 # Canonical audit configs: sorted, with sorted log types and exempted members.

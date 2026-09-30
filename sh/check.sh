@@ -1,6 +1,6 @@
 #!/bin/sh
-# Compares the live key and KEEPER_SA with config.env, policy/ and record/. Read-only; runs every check, exits 1 if any
-# failed.
+# Compares the live key, its alert and KEEPER_SA with config.env, policy/ and record/. Read-only; runs every check,
+# exits 1 if any failed.
 set -eu
 script_dir=$(dirname -- "$0")
 # shellcheck source=sh/lib.sh
@@ -115,6 +115,26 @@ else
   sa_bindings=$(json_field "$sa_policy" '[.bindings[]? | "\(.role):\(.members | join(","))"] | join(" ")')
   if [ -z "$sa_bindings" ]; then ok "nobody can act as $KEEPER_SA"; else fail "$KEEPER_SA has IAM bindings: $sa_bindings"; fi
 fi
+
+# Alert
+channel=$(find_channel "$KEY_PROJECT")
+[ -n "$channel" ] || fail "no email channel for $ALERT_EMAIL"
+# expect_alert NAME FILTER
+expect_alert() {
+  alert=$(find_alert "$KEY_PROJECT" "$1")
+  if [ -z "$alert" ]; then
+    fail "alert policy \"$1\" missing"
+    return 0
+  fi
+  expect "\"$1\" enabled" "$(json_field "$alert" '.enabled | tostring')" "true"
+  if [ -n "$channel" ] && [ "$(json_field "$alert" ".notificationChannels | index(\"$channel\") != null")" = true ]; then
+    ok "\"$1\" notifies $ALERT_EMAIL"
+  else
+    fail "\"$1\" does not notify $ALERT_EMAIL"
+  fi
+  expect "\"$1\" filter" "$(json_field "$alert" '.conditions[0] | (.conditionThreshold // .conditionMatchedLog).filter')" "$2"
+}
+expect_alert "$ALERT_NAME" "$ALERT_FILTER"
 
 [ "$failed" -ne 0 ] || log "all checks passed"
 exit "$failed"

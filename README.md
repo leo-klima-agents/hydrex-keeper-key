@@ -12,30 +12,33 @@ that they write in full, and the public key and address in `record/`.
 ## Setup
 
 Needs `gcloud`, `jq` and OpenSSL 3.2 or newer. `sh/setup.sh` needs `roles/owner` on the key project; the other scripts
-run as `ADMIN_MEMBER`, with `roles/iam.serviceAccountViewer` on `KEEPER_SA` for `sh/grant.sh` and `sh/check.sh`. Every
-script is safe to re-run.
+run as `ADMIN_MEMBER`, with `roles/iam.serviceAccountViewer` on `KEEPER_SA` for `sh/grant.sh` and `sh/check.sh`, and
+`roles/monitoring.viewer` on the key project for `sh/check.sh`. Every script is safe to re-run.
 
-1. **Configure.** `cp config.env.example config.env`, then fill in `KEY_PROJECT`, `KEEPER_PROJECT` and `ADMIN_MEMBER`.
+1. **Configure.** `cp config.env.example config.env`, then fill in `KEY_PROJECT`, `KEEPER_PROJECT`, `ADMIN_MEMBER` and
+   `ALERT_EMAIL`.
 2. **Create the key.** `sh/setup.sh` enables the APIs, creates the key ring and the key (asymmetric signing, secp256k1,
-   HSM, 120-day destroy window), writes the key's IAM policy and turns on the KMS audit logs. A key of another kind
-   under the same name is refused.
+   HSM, 120-day destroy window), writes the key's IAM policy, turns on the KMS audit logs, and creates an email alert to
+   `ALERT_EMAIL` on any change under the key ring: a key, a version or an IAM policy. A key of another kind under the
+   same name is refused.
 3. **Record the address.** `sh/address.sh` writes `record/`; commit it. A record for another key or address is kept
    unless `--force`. `address` is the module's `KEEPER` and cannot change there, so a new key means a new module.
 4. **Grant the keeper.** Once hydrex-keeper's `sh/setup.sh` has printed the keeper's service account, set `KEEPER_SA`
    and run `sh/grant.sh`.
-5. **Check for drift.** `sh/check.sh` compares the key, its IAM policy, the audit config and `KEEPER_SA` with
-   `config.env`, `policy/` and `record/`, read-only: one version, enabled, deriving to the recorded address; no
-   user-managed key of `KEEPER_SA`; nobody able to act as it.
+5. **Check for drift.** `sh/check.sh` compares the key, its IAM policy, the audit config, the alert and `KEEPER_SA` with
+   `config.env`, `policy/` and `record/`, read-only: one version, enabled, deriving to the recorded address; the alert
+   enabled and notifying `ALERT_EMAIL`; no user-managed key of `KEEPER_SA`; nobody able to act as it.
 
 The `check` workflow runs `sh/check.sh` every Friday and on demand, as a read-only service account in the key project
-(`roles/cloudkms.viewer` on the key ring, `roles/iam.securityReviewer` on the project, `roles/iam.serviceAccountViewer`
-on `KEEPER_SA`) reached by Workload Identity Federation through the `WIF_PROVIDER` and `CI_SERVICE_ACCOUNT` repository
-variables. It builds `config.env` from the repository variables named in `config.env.example`.
+(`roles/cloudkms.viewer` on the key ring, `roles/iam.securityReviewer` and `roles/monitoring.viewer` on the project,
+`roles/iam.serviceAccountViewer` on `KEEPER_SA`) reached by Workload Identity Federation through the `WIF_PROVIDER` and
+`CI_SERVICE_ACCOUNT` repository variables. It builds `config.env` from the repository variables named in
+`config.env.example`.
 
 Outside the scripts: hardware 2FA on `ADMIN_MEMBER`; no owner of the key project beyond `ADMIN_MEMBER`, since an owner
-can re-grant `cloudkms.admin`; the KMS audit logs sunk to a bucket the admins do not own, with an alert on
-`DestroyCryptoKeyVersion` and `UpdateCryptoKeyVersion`, since an admin has 120 days to cancel a scheduled destruction;
-and `iam.managed.disableServiceAccountKeyCreation` on the keeper project, since `check.sh` only detects keys.
+can re-grant `cloudkms.admin`; the KMS audit logs sunk to a bucket the admins do not own, since `_Default` keeps them
+for 30 days and an admin has 120 days to cancel a scheduled destruction; and
+`iam.managed.disableServiceAccountKeyCreation` on the keeper project, since `check.sh` only detects keys.
 
 ## Development
 

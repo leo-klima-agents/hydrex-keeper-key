@@ -1,10 +1,10 @@
-gcloud services enable cloudkms.googleapis.com cloudresourcemanager.googleapis.com iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com --project=hydrex-keeper-key-test
+gcloud services enable cloudkms.googleapis.com cloudresourcemanager.googleapis.com iam.googleapis.com iamcredentials.googleapis.com logging.googleapis.com monitoring.googleapis.com sts.googleapis.com --project=hydrex-keeper-key-test
 gcloud kms keyrings list --project=hydrex-keeper-key-test --location=us --format=json
 gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --format=json
 exit=1
 --- output ---
-== 1/6 APIs
-== 2/6 key ring
+== 1/7 APIs
+== 2/7 key ring
 exists: projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper
-== 3/6 key
+== 3/7 key
 error: projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 exists with purpose=ASYMMETRIC_SIGN algorithm=EC_SIGN_P256_SHA256 protectionLevel=SOFTWARE; not adopting it

@@ -5,6 +5,8 @@ gcloud kms keys get-iam-policy projects/hydrex-keeper-key-test/locations/us/keyR
 gcloud projects get-iam-policy hydrex-keeper-key-test --format=json
 gcloud iam service-accounts keys list --iam-account=hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com --managed-by=user --format=json
 gcloud iam service-accounts get-iam-policy --project=hydrex-keeper-test hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com --format=json
+gcloud beta monitoring channels list --project=hydrex-keeper-key-test --format=json
+gcloud monitoring policies list --project=hydrex-keeper-key-test --format=json
 exit=0
 --- output ---
 ok: record is consistent
@@ -21,4 +23,7 @@ ok: key IAM policy matches template
 ok: audit config for cloudkms.googleapis.com matches policy/audit.json
 ok: hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com has no user-managed keys
 ok: nobody can act as hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com
+ok: "hydrex-keeper key ring changed" enabled is true
+ok: "hydrex-keeper key ring changed" notifies hydrex-admin@example.com
+ok: "hydrex-keeper key ring changed" filter is logName="projects/hydrex-keeper-key-test/logs/cloudaudit.googleapis.com%2Factivity" AND protoPayload.serviceName="cloudkms.googleapis.com" AND protoPayload.resourceName=~"^projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper(/|$)"
 all checks passed

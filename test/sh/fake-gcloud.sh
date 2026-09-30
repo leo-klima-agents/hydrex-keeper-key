@@ -12,12 +12,15 @@ ring=projects/$project/locations/us/keyRings/hydrex-keeper
 key=$ring/cryptoKeys/hydrex-keeper-v1
 admin=user:hydrex-key-admin@example.com
 keeper_sa=hydrex-keeper@$keeper_project.iam.gserviceaccount.com
+email=hydrex-admin@example.com
+channel=projects/$project/notificationChannels/1234567890
 
 # What exists; ungranted is the state after setup.sh; foreign-key is another kind of key under the same name;
 # drift bends the live state; list-fails denies listing keys.
-has_ring=yes has_key=yes granted=yes has_audit=yes version_state=ENABLED foreign=no drift=no list_fails=no
+has_ring=yes has_key=yes granted=yes has_audit=yes has_channel=yes has_alert=yes version_state=ENABLED
+foreign=no drift=no list_fails=no
 case "$FAKE_GCLOUD_SCENARIO" in
-  fresh) has_ring=no has_key=no granted=no has_audit=no version_state=PENDING_GENERATION ;;
+  fresh) has_ring=no has_key=no granted=no has_audit=no has_channel=no has_alert=no version_state=PENDING_GENERATION ;;
   ungranted) granted=no ;;
   existing) ;;
   foreign-key) foreign=yes ;;
@@ -92,6 +95,18 @@ sa_policy_json() {
   else
     printf '{"etag":"BwSaEmpty"}\n'
   fi
+}
+
+alert_json() {
+  filter="logName=\"projects/$project/logs/cloudaudit.googleapis.com%2Factivity\" AND protoPayload.serviceName=\"cloudkms.googleapis.com\" AND protoPayload.resourceName=~\"^$ring(/|\$)\""
+  if [ "$drift" = yes ]; then # disabled, without a channel, and its filter edited by hand
+    enabled=false channels='[]' filter='protoPayload.serviceName="cloudkms.googleapis.com"'
+  else
+    enabled=true channels="[\"$channel\"]"
+  fi
+  jq -nc --arg name "hydrex-keeper key ring changed" --arg filter "$filter" --argjson enabled "$enabled" \
+    --argjson channels "$channels" --arg project "$project" \
+    '{displayName: $name, enabled: $enabled, name: "projects/\($project)/alertPolicies/1", notificationChannels: $channels, conditions: [{conditionMatchedLog: {filter: $filter}}]}'
 }
 
 log_call() { printf 'gcloud %s\n' "$*" >>"$FAKE_GCLOUD_LOG"; }
@@ -170,6 +185,29 @@ case "$*" in
     ;;
   "projects set-iam-policy "*)
     log_set_policy "$(project_policy_json | jq -r .etag)" "$@"
+    ;;
+  "beta monitoring channels list "*)
+    log_call "$@"
+    if [ "$has_channel" = yes ]; then
+      printf '[{"name":"%s","type":"email","labels":{"email_address":"%s"}}]\n' "$channel" "$email"
+    else
+      printf '[]\n'
+    fi
+    ;;
+  "beta monitoring channels create "*)
+    log_call "$@"
+    printf '%s\n' "$channel"
+    ;;
+  "monitoring policies list "*)
+    log_call "$@"
+    if [ "$has_alert" = yes ]; then printf '[%s]\n' "$(alert_json)"; else printf '[]\n'; fi
+    ;;
+  "monitoring policies create "*)
+    logged=''
+    for arg in "$@"; do
+      case "$arg" in --policy-from-file=*) logged="$logged $(jq -c -S . "${arg#*=}")" ;; *) logged="$logged $arg" ;; esac
+    done
+    log_call "${logged# }"
     ;;
   "iam service-accounts describe "*)
     log_call "$@"
