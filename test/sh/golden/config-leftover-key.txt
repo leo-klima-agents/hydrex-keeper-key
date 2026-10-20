@@ -1,0 +1,3 @@
+exit=1
+--- output ---
+error: KEY is set in config/leftover-key.env; rename it to KEEPER_KEY

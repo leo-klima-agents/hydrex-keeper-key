@@ -1,0 +1,3 @@
+exit=1
+--- output ---
+error: record/proposer.json missing; run address.sh

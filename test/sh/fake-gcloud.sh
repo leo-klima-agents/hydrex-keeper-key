@@ -5,23 +5,26 @@ set -eu
 
 : "${FAKE_GCLOUD_LOG:?}" "${FAKE_GCLOUD_SCENARIO:?}"
 
-# Mirrors test/sh/config/key.env and the defaults in sh/lib.sh.
+# Mirrors test/sh/config/two-keys.env and the defaults in sh/lib.sh.
 project=hydrex-keeper-key-test
 keeper_project=hydrex-keeper-test
 ring=projects/$project/locations/us/keyRings/hydrex-keeper
-key=$ring/cryptoKeys/hydrex-keeper-v1
+keeper_key=$ring/cryptoKeys/hydrex-keeper-v1
+proposer_key=$ring/cryptoKeys/hydrex-proposer-v1
 admin=user:hydrex-key-admin@example.com
 keeper_sa=hydrex-keeper@$keeper_project.iam.gserviceaccount.com
 email=hydrex-admin@example.com
 channel=projects/$project/notificationChannels/1234567890
 
-# What exists; ungranted is the state after setup.sh; foreign-key is another kind of key under the same name;
-# drift bends the live state; list-fails denies listing keys.
-has_ring=yes has_key=yes granted=yes has_audit=yes has_channel=yes has_alert=yes version_state=ENABLED
+# What exists; ungranted is the state after setup.sh; no-proposer lacks the proposer's key; foreign-key is another kind
+# of key under the same names; drift bends the live state; list-fails denies listing keys. A key that does not exist is
+# one that setup.sh creates, with version 1 PENDING_GENERATION.
+has_ring=yes has_keeper=yes has_proposer=yes granted=yes has_audit=yes has_channel=yes has_alert=yes
 foreign=no drift=no list_fails=no
 case "$FAKE_GCLOUD_SCENARIO" in
-  fresh) has_ring=no has_key=no granted=no has_audit=no has_channel=no has_alert=no version_state=PENDING_GENERATION ;;
+  fresh) has_ring=no has_keeper=no has_proposer=no granted=no has_audit=no has_channel=no has_alert=no ;;
   ungranted) granted=no ;;
+  no-proposer) has_proposer=no ;;
   existing) ;;
   foreign-key) foreign=yes ;;
   drift) drift=yes ;;
@@ -38,19 +41,43 @@ else
   algorithm=EC_SIGN_SECP256K1_SHA256 protection=HSM window=10368000s
 fi
 
-# Public key of secp256k1 private key 1.
+# for_key NAME: points key, exists, state and private_key at the key of NAME, a key or a key version.
+for_key() {
+  key=${1%/cryptoKeyVersions/*}
+  case "$key" in
+    "$keeper_key") exists=$has_keeper private_key=1 ;;
+    "$proposer_key") exists=$has_proposer private_key=2 ;;
+    *)
+      printf 'fake-gcloud: unknown key %s\n' "$1" >&2
+      exit 97
+      ;;
+  esac
+  if [ "$exists" = yes ]; then state=ENABLED; else state=PENDING_GENERATION; fi
+}
+
+# pem: the public key of secp256k1 private key 1 for the keeper, 2 for the proposer.
 pem() {
-  cat <<EOT
+  if [ "$private_key" = 1 ]; then
+    cat <<EOT
 -----BEGIN PUBLIC KEY-----
 MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEeb5mfvncu6xVoGKVzocLBwKb/NstzijZ
 WfKBWxb4F5hIOtp3JqPEZV2k+/wOEQio/Re0SKaFVBmcR9CP+xDUuA==
 -----END PUBLIC KEY-----
 EOT
+  else
+    cat <<EOT
+-----BEGIN PUBLIC KEY-----
+MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAExgR/lEHtfW0wRUBulcB82Fx3jkuM7zyn
+q6wJuVxwnuUa4Wj+pj3DOaPFhBlGbOru9/YyZTJm0OEjZDGpUM/lKg==
+-----END PUBLIC KEY-----
+EOT
+  fi
 }
 
+# key_json NAME
 key_json() {
   printf '{"destroyScheduledDuration":"%s","name":"%s","purpose":"ASYMMETRIC_SIGN","versionTemplate":{"algorithm":"%s","protectionLevel":"%s"}}' \
-    "$window" "$key" "$algorithm" "$protection"
+    "$window" "$1" "$algorithm" "$protection"
 }
 
 # version_json NUMBER STATE
@@ -63,7 +90,7 @@ key_policy_json() {
   admin_binding='{"role":"roles/cloudkms.admin","members":["'$admin'"]}'
   keeper_bindings='{"role":"roles/cloudkms.publicKeyViewer","members":["serviceAccount:'$keeper_sa'"]},{"role":"roles/cloudkms.signer","members":["serviceAccount:'$keeper_sa'"]}'
   stray='{"role":"roles/cloudkms.viewer","members":["user:stray@example.com"]}'
-  if [ "$has_key" = no ]; then
+  if [ "$exists" = no ]; then
     printf '{"etag":"ACAB"}\n'
   elif [ "$granted" = no ]; then
     printf '{"bindings":[%s],"etag":"BwKeyAdmin","version":1}\n' "$admin_binding"
@@ -143,26 +170,36 @@ case "$*" in
       printf 'ERROR: (gcloud.kms.keys.list) PERMISSION_DENIED\n' >&2
       exit 1
     }
-    if [ "$has_key" = yes ]; then printf '[{"name":"%s/cryptoKeys/other","purpose":"ENCRYPT_DECRYPT"},%s]\n' "$ring" "$(key_json)"; else printf '[]\n'; fi
+    keys=''
+    [ "$has_ring" = no ] || keys=$(printf '{"name":"%s/cryptoKeys/other","purpose":"ENCRYPT_DECRYPT"}' "$ring")
+    [ "$has_keeper" = no ] || keys="$keys,$(key_json "$keeper_key")"
+    [ "$has_proposer" = no ] || keys="$keys,$(key_json "$proposer_key")"
+    printf '[%s]\n' "${keys#,}"
     ;;
   "kms keys get-iam-policy "*)
     log_call "$@"
+    for_key "$4"
     key_policy_json
     ;;
   "kms keys set-iam-policy "*)
+    for_key "$4"
     log_set_policy "$(key_policy_json | jq -r .etag)" "$@"
     ;;
   "kms keys versions describe "*)
     log_call "$@"
-    version_json 1 "$version_state"
+    for_key "$5"
+    version_json 1 "$state"
     printf '\n'
     ;;
   "kms keys versions list "*)
     log_call "$@"
+    for arg in "$@"; do
+      case "$arg" in --key=*) for_key "$ring/cryptoKeys/${arg#*=}" ;; esac
+    done
     if [ "$drift" = yes ]; then
-      printf '[%s,%s]\n' "$(version_json 1 "$version_state")" "$(version_json 2 ENABLED)"
+      printf '[%s,%s]\n' "$(version_json 1 "$state")" "$(version_json 2 ENABLED)"
     else
-      printf '[%s]\n' "$(version_json 1 "$version_state")"
+      printf '[%s]\n' "$(version_json 1 "$state")"
     fi
     ;;
   "kms keys versions get-public-key "*)
@@ -177,6 +214,7 @@ case "$*" in
       esac
     done
     log_call "${logged# }"
+    for_key "$5"
     pem >"$output_file"
     ;;
   "projects get-iam-policy "*)

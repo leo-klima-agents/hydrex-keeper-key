@@ -1,0 +1,3 @@
+exit=1
+--- output ---
+error: KEEPER_KEY and PROPOSER_KEY must differ

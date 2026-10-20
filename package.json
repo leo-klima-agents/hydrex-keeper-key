@@ -2,7 +2,7 @@
   "name": "hydrex-keeper-key",
   "version": "0.1.0",
   "private": true,
-  "description": "Cloud KMS key that signs the weekly Hydrex vote: its creation, its address on record and the keeper's grant",
+  "description": "Cloud KMS keys that sign the Hydrex votes, the keeper's and the proposer's: their creation, their addresses on record and the keeper's grant",
   "license": "MIT",
   "engines": {
     "node": "26"

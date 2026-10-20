@@ -8,17 +8,17 @@ gcloud beta monitoring channels list --project=hydrex-keeper-key-test --format=j
 gcloud monitoring policies list --project=hydrex-keeper-key-test --format=json
 exit=1
 --- output ---
-ok: record is consistent
-ok: key purpose is ASYMMETRIC_SIGN
-FAIL: key algorithm is EC_SIGN_P256_SHA256, expected EC_SIGN_SECP256K1_SHA256
-FAIL: key protection level is SOFTWARE, expected HSM
-FAIL: key destroy window is 86400s, expected 10368000s
-ok: key versions is 1
-ok: version 1 state is ENABLED
-FAIL: version 1 algorithm is EC_SIGN_P256_SHA256, expected EC_SIGN_SECP256K1_SHA256
-FAIL: version 1 protection level is SOFTWARE, expected HSM
-skipping the address check
-ok: key IAM policy matches template
+ok: keeper record is consistent
+ok: keeper key purpose is ASYMMETRIC_SIGN
+FAIL: keeper key algorithm is EC_SIGN_P256_SHA256, expected EC_SIGN_SECP256K1_SHA256
+FAIL: keeper key protection level is SOFTWARE, expected HSM
+FAIL: keeper key destroy window is 86400s, expected 10368000s
+ok: keeper key versions is 1
+ok: keeper version 1 state is ENABLED
+FAIL: keeper version 1 algorithm is EC_SIGN_P256_SHA256, expected EC_SIGN_SECP256K1_SHA256
+FAIL: keeper version 1 protection level is SOFTWARE, expected HSM
+skipping the keeper address check
+ok: keeper key IAM policy matches template
 ok: audit config for cloudkms.googleapis.com matches policy/audit.json
 ok: hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com has no user-managed keys
 ok: nobody can act as hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com

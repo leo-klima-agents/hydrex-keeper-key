@@ -1,0 +1,23 @@
+gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --format=json
+gcloud kms keys versions describe projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-proposer-v1/cryptoKeyVersions/1 --format=json
+gcloud kms keys versions get-public-key projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-proposer-v1/cryptoKeyVersions/1 --output-file=<file>
+exit=0
+--- output ---
+wrote record-one/proposer.pem and proposer.json; commit both
+proposer 0x2B5AD5c4795c026514f8317c7a215E218DcCD6cF
+--- record/keeper.json ---
+{
+  "key": "projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1",
+  "version": "projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1/cryptoKeyVersions/1",
+  "algorithm": "EC_SIGN_SECP256K1_SHA256",
+  "protectionLevel": "HSM",
+  "address": "0x0000000000000000000000000000000000000001"
+}
+--- record/proposer.json ---
+{
+  "key": "projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-proposer-v1",
+  "version": "projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-proposer-v1/cryptoKeyVersions/1",
+  "algorithm": "EC_SIGN_SECP256K1_SHA256",
+  "protectionLevel": "HSM",
+  "address": "0x2B5AD5c4795c026514f8317c7a215E218DcCD6cF"
+}
