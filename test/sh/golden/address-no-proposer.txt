@@ -1,0 +1,3 @@
+exit=1
+--- output ---
+error: PROPOSER_KEY is not set in config/key.env

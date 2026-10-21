@@ -4,7 +4,7 @@ gcloud kms keys versions get-public-key projects/hydrex-keeper-key-test/location
 exit=0
 --- output ---
 wrote record/keeper.pem and keeper.json; commit both
-0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf
+keeper 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf
 --- record/keeper.json ---
 {
   "key": "projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1",

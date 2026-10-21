@@ -1,5 +1,6 @@
 #!/bin/sh
-# Creates the key ring, the HSM key, its IAM policy, the KMS audit logs and the alert in the key project. Idempotent.
+# Creates the key ring, an HSM key per role, their IAM policies, the KMS audit logs and the alert in the key project.
+# Idempotent.
 set -eu
 script_dir=$(dirname -- "$0")
 # shellcheck source=sh/lib.sh
@@ -24,29 +25,35 @@ else
 fi
 
 log "== 3/7 key"
-key=$(find_key)
-if [ -z "$key" ]; then
-  log "creating $KEY_NAME"
-  gcloud kms keys create "$KEY_NAME" \
-    --purpose="$KEY_PURPOSE" \
-    --default-algorithm="$KEY_ALGORITHM" \
-    --protection-level="$KEY_PROTECTION" \
-    --destroy-scheduled-duration="$DESTROY_WINDOW"
-else
-  read_key_attrs "$key"
-  if [ "$purpose" != "$KEY_PURPOSE_API" ] || [ "$algorithm" != "$KEY_ALGORITHM_API" ] || [ "$protection" != "$KEY_PROTECTION_API" ]; then
-    die "$KEY_NAME exists with purpose=$purpose algorithm=$algorithm protectionLevel=$protection; not adopting it"
+for role in $ROLES; do
+  use_key "$role"
+  key=$(find_key)
+  if [ -z "$key" ]; then
+    log "creating $ROLE key $KEY_NAME"
+    gcloud kms keys create "$KEY_NAME" \
+      --purpose="$KEY_PURPOSE" \
+      --default-algorithm="$KEY_ALGORITHM" \
+      --protection-level="$KEY_PROTECTION" \
+      --destroy-scheduled-duration="$DESTROY_WINDOW"
+  else
+    read_key_attrs "$key"
+    if [ "$purpose" != "$KEY_PURPOSE_API" ] || [ "$algorithm" != "$KEY_ALGORITHM_API" ] || [ "$protection" != "$KEY_PROTECTION_API" ]; then
+      die "$KEY_NAME exists with purpose=$purpose algorithm=$algorithm protectionLevel=$protection; not adopting it"
+    fi
+    # The destroy window cannot be changed after creation.
+    [ "$window" = "$DESTROY_WINDOW_API" ] ||
+      die "$KEY_NAME has destroy window ${window:-unset}, expected $DESTROY_WINDOW_API; use another $KEY_VAR name"
+    log "exists: $ROLE key $KEY_NAME"
   fi
-  # The destroy window cannot be changed after creation.
-  [ "$window" = "$DESTROY_WINDOW_API" ] ||
-    die "$KEY_NAME has destroy window ${window:-unset}, expected $DESTROY_WINDOW_API; use another KEY name"
-  log "exists: $KEY_NAME"
-fi
+done
 
 log "== 4/7 key IAM"
 [ -n "$KEEPER_SA" ] || log "KEEPER_SA empty: admin only"
 key_policy=$(render_policy key.iam.json.tmpl)
-set_iam "$KEY_NAME" "" "$key_policy" kms keys
+for role in $ROLES; do
+  use_key "$role"
+  set_iam "$ROLE key" "$KEY_NAME" "" "$key_policy" kms keys
+done
 
 log "== 5/7 audit logs"
 set_audit
@@ -85,7 +92,10 @@ jq -n --arg name "$ALERT_NAME" --arg filter "$ALERT_FILTER" --arg channel "$chan
 ensure_alert "$KEY_PROJECT" "$ALERT_NAME" "$TMP/alert.json"
 
 log "== 7/7 key version"
-describe_version_1
-log "state: $version_state"
-[ "$version_state" = "ENABLED" ] || log "run address.sh once ENABLED"
-printf '%s\n' "$KEY_VERSION_NAME"
+for role in $ROLES; do
+  use_key "$role"
+  describe_version_1
+  log "$ROLE version 1 state: $version_state"
+  [ "$version_state" = "ENABLED" ] || log "run address.sh $ROLE once ENABLED"
+  printf '%s %s\n' "$ROLE" "$KEY_VERSION_NAME"
+done

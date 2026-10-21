@@ -1,0 +1,43 @@
+gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --format=json
+gcloud kms keys versions list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --key=hydrex-keeper-v1 --format=json
+gcloud kms keys versions get-public-key projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1/cryptoKeyVersions/1 --output-file=<file>
+gcloud kms keys get-iam-policy projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 --format=json
+gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --format=json
+gcloud kms keys versions list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --key=hydrex-proposer-v1 --format=json
+gcloud kms keys versions get-public-key projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-proposer-v1/cryptoKeyVersions/1 --output-file=<file>
+gcloud kms keys get-iam-policy projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-proposer-v1 --format=json
+gcloud projects get-iam-policy hydrex-keeper-key-test --format=json
+gcloud iam service-accounts keys list --iam-account=hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com --managed-by=user --format=json
+gcloud iam service-accounts get-iam-policy --project=hydrex-keeper-test hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com --format=json
+gcloud beta monitoring channels list --project=hydrex-keeper-key-test --format=json
+gcloud monitoring policies list --project=hydrex-keeper-key-test --format=json
+exit=1
+--- output ---
+ok: keeper record is consistent
+ok: keeper key purpose is ASYMMETRIC_SIGN
+ok: keeper key algorithm is EC_SIGN_SECP256K1_SHA256
+ok: keeper key protection level is HSM
+ok: keeper key destroy window is 10368000s
+ok: keeper key versions is 1
+ok: keeper version 1 state is ENABLED
+ok: keeper version 1 algorithm is EC_SIGN_SECP256K1_SHA256
+ok: keeper version 1 protection level is HSM
+ok: address of keeper version 1 is 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf
+ok: keeper key IAM policy matches template
+ok: proposer record is consistent
+ok: proposer key purpose is ASYMMETRIC_SIGN
+ok: proposer key algorithm is EC_SIGN_SECP256K1_SHA256
+ok: proposer key protection level is HSM
+ok: proposer key destroy window is 10368000s
+ok: proposer key versions is 1
+ok: proposer version 1 state is ENABLED
+ok: proposer version 1 algorithm is EC_SIGN_SECP256K1_SHA256
+ok: proposer version 1 protection level is HSM
+FAIL: address of proposer version 1 is 0x2B5AD5c4795c026514f8317c7a215E218DcCD6cF, expected 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf
+ok: proposer key IAM policy matches template
+ok: audit config for cloudkms.googleapis.com matches policy/audit.json
+ok: hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com has no user-managed keys
+ok: nobody can act as hydrex-keeper@hydrex-keeper-test.iam.gserviceaccount.com
+ok: "hydrex-keeper key ring changed" enabled is true
+ok: "hydrex-keeper key ring changed" notifies hydrex-admin@example.com
+ok: "hydrex-keeper key ring changed" filter is logName="projects/hydrex-keeper-key-test/logs/cloudaudit.googleapis.com%2Factivity" AND protoPayload.serviceName="cloudkms.googleapis.com" AND protoPayload.resourceName=~"^projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper(/|$)"

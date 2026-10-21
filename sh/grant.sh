@@ -1,5 +1,5 @@
 #!/bin/sh
-# Writes the key's IAM policy with KEEPER_SA as its only signer. Idempotent.
+# Writes the IAM policy of each role's key with KEEPER_SA as its only signer. Idempotent.
 set -eu
 script_dir=$(dirname -- "$0")
 # shellcheck source=sh/lib.sh
@@ -16,4 +16,7 @@ gcloud iam service-accounts describe "$KEEPER_SA" --project="$KEEPER_PROJECT" --
   die "$KEEPER_SA not found in $KEEPER_PROJECT"
 
 key_policy=$(render_policy key.iam.json.tmpl)
-set_iam "$KEY_NAME" "" "$key_policy" kms keys
+for role in $ROLES; do
+  use_key "$role"
+  set_iam "$ROLE key" "$KEY_NAME" "" "$key_policy" kms keys
+done

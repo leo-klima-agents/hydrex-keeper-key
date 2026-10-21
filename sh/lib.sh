@@ -46,12 +46,15 @@ require_tools() {
 load_config() {
   [ -f "$CONFIG_FILE" ] || die "$CONFIG_FILE missing; copy config.env.example"
   case "$CONFIG_FILE" in */*) ;; *) CONFIG_FILE=./$CONFIG_FILE ;; esac # else `.` searches PATH
-  unset KEY_PROJECT KEEPER_PROJECT LOCATION KEY_RING KEY ADMIN_MEMBER KEEPER_SA ALERT_EMAIL
+  unset KEY_PROJECT KEEPER_PROJECT LOCATION KEY_RING KEY KEEPER_KEY PROPOSER_KEY ADMIN_MEMBER KEEPER_SA ALERT_EMAIL
   # shellcheck source=/dev/null
   . "$CONFIG_FILE"
+  # A leftover KEY may name another key than KEEPER_KEY's default.
+  [ -z "${KEY+set}" ] || die "KEY is set in $CONFIG_FILE; rename it to KEEPER_KEY"
   LOCATION=${LOCATION:-us}
   KEY_RING=${KEY_RING:-hydrex-keeper}
-  KEY=${KEY:-hydrex-keeper-v1}
+  KEEPER_KEY=${KEEPER_KEY:-hydrex-keeper-v1}
+  PROPOSER_KEY=${PROPOSER_KEY:-}
   KEEPER_SA=${KEEPER_SA:-}
 
   for required in KEY_PROJECT KEEPER_PROJECT ADMIN_MEMBER ALERT_EMAIL; do
@@ -60,6 +63,8 @@ load_config() {
   done
   [ "$KEY_PROJECT" != "$KEEPER_PROJECT" ] ||
     die "KEY_PROJECT and KEEPER_PROJECT must differ"
+  [ "$PROPOSER_KEY" != "$KEEPER_KEY" ] ||
+    die "KEEPER_KEY and PROPOSER_KEY must differ"
   case "$ADMIN_MEMBER" in
     user:?*@?* | group:?*@?*) ;;
     *) die "ADMIN_MEMBER must be user:EMAIL or group:EMAIL" ;;
@@ -75,12 +80,29 @@ load_config() {
     *) die "ALERT_EMAIL must be an email address" ;;
   esac
 
+  # The roles with a key, in order; use_key points the per-key variables at one of them.
+  ROLES=keeper
+  [ -z "$PROPOSER_KEY" ] || ROLES="keeper proposer"
   KEY_RING_NAME=projects/$KEY_PROJECT/locations/$LOCATION/keyRings/$KEY_RING
-  KEY_NAME=$KEY_RING_NAME/cryptoKeys/$KEY
-  KEY_VERSION_NAME=$KEY_NAME/cryptoKeyVersions/1
   ALERT_NAME="$KEY_RING key ring changed"
   # Admin Activity audit logs record every write under the key ring: keys, versions and IAM policies.
   ALERT_FILTER="logName=\"projects/$KEY_PROJECT/logs/cloudaudit.googleapis.com%2Factivity\" AND protoPayload.serviceName=\"$KMS_SERVICE\" AND protoPayload.resourceName=~\"^$KEY_RING_NAME(/|\$)\""
+}
+
+# use_key ROLE: points ROLE, KEY, its config variable KEY_VAR, KEY_NAME, KEY_VERSION_NAME, and the record files
+# RECORD_JSON and RECORD_PEM at ROLE's key.
+use_key() {
+  case "$1" in
+    keeper) KEY=$KEEPER_KEY KEY_VAR=KEEPER_KEY ;;
+    proposer) KEY=$PROPOSER_KEY KEY_VAR=PROPOSER_KEY ;;
+    *) die "unknown role $1" ;;
+  esac
+  [ -n "$KEY" ] || die "$KEY_VAR is not set in $CONFIG_FILE"
+  ROLE=$1
+  KEY_NAME=$KEY_RING_NAME/cryptoKeys/$KEY
+  KEY_VERSION_NAME=$KEY_NAME/cryptoKeyVersions/1
+  RECORD_JSON=$RECORD_DIR/$ROLE.json
+  RECORD_PEM=$RECORD_DIR/$ROLE.pem
 }
 
 # render_policy FILE: policy/FILE with the principals filled in. A binding whose principal is empty is dropped.
@@ -137,20 +159,22 @@ get_iam() {
   printf '%s\n' "$iam_json"
 }
 
-# set_iam RESOURCE FLAGS DESIRED gcloud-subcommand...: writes DESIRED in full, with the live etag, unless it matches.
+# set_iam LABEL RESOURCE FLAGS DESIRED gcloud-subcommand...: writes DESIRED in full, with the live etag, unless it
+# matches. LABEL names RESOURCE in the log.
 set_iam() {
-  set_iam_resource=$1
-  set_iam_flags=$2
-  set_iam_desired=$3
-  shift 3
+  set_iam_label=$1
+  set_iam_resource=$2
+  set_iam_flags=$3
+  set_iam_desired=$4
+  shift 4
   set_iam_live=$(get_iam "$set_iam_resource" "$set_iam_flags" "$@")
   if ! policy_differs "$set_iam_live" "$set_iam_desired"; then
-    log "iam: $set_iam_resource unchanged"
+    log "iam: $set_iam_label $set_iam_resource unchanged"
     return 0
   fi
   set_iam_etag=$(printf '%s\n' "$set_iam_live" | jq -r '.etag // empty')
   printf '%s\n' "$set_iam_desired" | jq --arg etag "$set_iam_etag" '.etag = $etag' >"$TMP/policy.json"
-  log "iam: writing $set_iam_resource"
+  log "iam: writing $set_iam_label $set_iam_resource"
   # shellcheck disable=SC2086
   gcloud "$@" set-iam-policy $set_iam_flags "$set_iam_resource" "$TMP/policy.json" >/dev/null
 }
@@ -219,11 +243,10 @@ read_version_attrs() {
   version_protection=$(json_field "$1" .protectionLevel)
 }
 
-# read_record: sets recorded_version and recorded_address from record/keeper.json.
+# read_record: sets recorded_version and recorded_address from the role's record, RECORD_JSON.
 read_record() {
-  record_file=$RECORD_DIR/keeper.json
-  [ -f "$record_file" ] || die "$record_file missing; run address.sh"
-  record_json=$(jq -ce 'select(type == "object")' "$record_file" 2>/dev/null) || die "$record_file is not a JSON object"
+  [ -f "$RECORD_JSON" ] || die "$RECORD_JSON missing; run address.sh"
+  record_json=$(jq -ce 'select(type == "object")' "$RECORD_JSON" 2>/dev/null) || die "$RECORD_JSON is not a JSON object"
   recorded_version=$(json_field "$record_json" .version)
   recorded_address=$(json_field "$record_json" .address)
 }
@@ -236,7 +259,7 @@ find_keyring() {
   printf '%s\n' "$rings" | jq -r --arg name "$KEY_RING_NAME" 'first(.[] | select(.name == $name) | .name) // ""'
 }
 
-# find_key: the key as JSON, or "".
+# find_key: the role's key as JSON, or "".
 find_key() {
   keys=$(gcloud kms keys list --project="$KEY_PROJECT" --location="$LOCATION" --keyring="$KEY_RING" --format=json) ||
     die "cannot list keys of $KEY_RING_NAME"
@@ -244,13 +267,13 @@ find_key() {
   printf '%s\n' "$keys" | jq -c --arg name "$KEY_NAME" 'first(.[] | select(.name == $name)) // empty'
 }
 
-# describe_version_1: read_version_attrs on the live version 1, which must be of the expected kind.
+# describe_version_1: read_version_attrs on the live version 1 of the role's key, which must be of the expected kind.
 describe_version_1() {
   version_json=$(gcloud kms keys versions describe "$KEY_VERSION_NAME" --format=json) || die "cannot describe $KEY_VERSION_NAME"
   require_json "$version_json" "key version 1"
   read_version_attrs "$version_json"
   if [ "$version_algorithm" != "$KEY_ALGORITHM_API" ] || [ "$version_protection" != "$KEY_PROTECTION_API" ]; then
-    die "version 1 is algorithm=$version_algorithm protectionLevel=$version_protection"
+    die "$ROLE version 1 is algorithm=$version_algorithm protectionLevel=$version_protection"
   fi
 }
 

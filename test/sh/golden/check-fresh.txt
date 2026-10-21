@@ -1,5 +1,5 @@
 gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --format=json
 exit=1
 --- output ---
-ok: record is consistent
+ok: keeper record is consistent
 error: projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 not found; run setup.sh

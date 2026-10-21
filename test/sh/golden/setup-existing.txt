@@ -12,14 +12,14 @@ exit=0
 == 2/7 key ring
 exists: projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper
 == 3/7 key
-exists: projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1
+exists: keeper key projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1
 == 4/7 key IAM
-iam: projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 unchanged
+iam: keeper key projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1 unchanged
 == 5/7 audit logs
 audit: hydrex-keeper-key-test unchanged
 == 6/7 alert
 exists: projects/hydrex-keeper-key-test/notificationChannels/1234567890
 exists: hydrex-keeper key ring changed
 == 7/7 key version
-state: ENABLED
-projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1/cryptoKeyVersions/1
+keeper version 1 state: ENABLED
+keeper projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1/cryptoKeyVersions/1

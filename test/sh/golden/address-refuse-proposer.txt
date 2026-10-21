@@ -1,0 +1,14 @@
+gcloud kms keys list --project=hydrex-keeper-key-test --location=us --keyring=hydrex-keeper --format=json
+gcloud kms keys versions describe projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-proposer-v1/cryptoKeyVersions/1 --format=json
+gcloud kms keys versions get-public-key projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-proposer-v1/cryptoKeyVersions/1 --output-file=<file>
+exit=1
+--- output ---
+error: proposer record has 0x0000000000000000000000000000000000000002 for projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-proposer-v1/cryptoKeyVersions/1; live key is 0x2B5AD5c4795c026514f8317c7a215E218DcCD6cF for projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-proposer-v1/cryptoKeyVersions/1. A new key means a new PROPOSER in hydrex-keeper's config, and funding that address; --force to overwrite
+--- record/proposer.json ---
+{
+  "key": "projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-proposer-v1",
+  "version": "projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-proposer-v1/cryptoKeyVersions/1",
+  "algorithm": "EC_SIGN_SECP256K1_SHA256",
+  "protectionLevel": "HSM",
+  "address": "0x0000000000000000000000000000000000000002"
+}

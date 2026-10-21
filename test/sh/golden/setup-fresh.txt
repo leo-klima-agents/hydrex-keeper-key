@@ -18,16 +18,16 @@ exit=0
 == 2/7 key ring
 creating projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper
 == 3/7 key
-creating projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1
+creating keeper key projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1
 == 4/7 key IAM
 KEEPER_SA empty: admin only
-iam: writing projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1
+iam: writing keeper key projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1
 == 5/7 audit logs
 audit: writing hydrex-keeper-key-test
 == 6/7 alert
 creating email channel for hydrex-admin@example.com
 creating alert policy: hydrex-keeper key ring changed
 == 7/7 key version
-state: PENDING_GENERATION
-run address.sh once ENABLED
-projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1/cryptoKeyVersions/1
+keeper version 1 state: PENDING_GENERATION
+run address.sh keeper once ENABLED
+keeper projects/hydrex-keeper-key-test/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-keeper-v1/cryptoKeyVersions/1
