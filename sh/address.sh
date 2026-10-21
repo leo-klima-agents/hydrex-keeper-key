@@ -22,7 +22,7 @@ load_config
 make_tmp
 
 roles=${roles:-$ROLES}
-# Every role named must have a key before any record is written.
+# Every role named must be configured before any record is written.
 for role in $roles; do use_key "$role"; done
 
 for role in $roles; do

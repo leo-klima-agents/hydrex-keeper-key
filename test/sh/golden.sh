@@ -171,7 +171,9 @@ PEM
 golden_case check-other-pem existing key record-other-pem check.sh
 
 golden_case check-two-keys existing two-keys record-both check.sh
+golden_case check-drift-two-keys drift two-keys record-both check.sh
 golden_case check-proposer-missing existing two-keys record check.sh # record holds the keeper's alone
+golden_case check-proposer-unset existing key record-both check.sh
 
 # A proposer record for the keeper's public key and address: consistent in itself, but not the live key's.
 mkdir record-proposer-mismatch

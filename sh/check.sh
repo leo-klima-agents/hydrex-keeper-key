@@ -96,6 +96,11 @@ check_key() {
   expect_policy "$ROLE key" "$key_policy" key.iam.json.tmpl
 }
 
+# A record without a key in config.env would go unchecked.
+if [ -z "$PROPOSER_KEY" ] && { [ -f "$RECORD_DIR/proposer.json" ] || [ -f "$RECORD_DIR/proposer.pem" ]; }; then
+  fail "$RECORD_DIR has a proposer record but PROPOSER_KEY is not set"
+fi
+
 # A missing record stops the check before any call.
 for role in $ROLES; do
   use_key "$role"

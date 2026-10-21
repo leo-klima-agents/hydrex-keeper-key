@@ -46,8 +46,8 @@ The `check` workflow runs `sh/check.sh` every Friday and on demand, as a read-on
 (`roles/cloudkms.viewer` on the key ring, `roles/iam.securityReviewer` and `roles/monitoring.viewer` on the project,
 `roles/iam.serviceAccountViewer` on `KEEPER_SA`) reached by Workload Identity Federation through the `WIF_PROVIDER` and
 `CI_SERVICE_ACCOUNT` repository variables. It builds `config.env` from the repository variables named in
-`config.env.example`: set `PROPOSER_KEY` to check the proposer key, and rename a `KEY` variable, if one is set, to
-`KEEPER_KEY`.
+`config.env.example`: set `PROPOSER_KEY` once `record/proposer.json` is committed, since `sh/check.sh` fails on either
+without the other, and rename a `KEY` variable, if one is set, to `KEEPER_KEY`.
 
 Outside the scripts: hardware 2FA on `ADMIN_MEMBER`; no owner of the key project beyond `ADMIN_MEMBER`, since an owner
 can re-grant `cloudkms.admin`; the KMS audit logs sunk to a bucket the admins do not own, since `_Default` keeps them
