@@ -1,0 +1,7 @@
+{
+  "key": "projects/hydrex-keeper-key-bpzw/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-proposer-v1",
+  "version": "projects/hydrex-keeper-key-bpzw/locations/us/keyRings/hydrex-keeper/cryptoKeys/hydrex-proposer-v1/cryptoKeyVersions/1",
+  "algorithm": "EC_SIGN_SECP256K1_SHA256",
+  "protectionLevel": "HSM",
+  "address": "0x52c139f60452B93e1211F116BD43B28d7AfC2bCa"
+}
