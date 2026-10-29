@@ -56,10 +56,11 @@ for 30 days and an admin has 120 days to cancel a scheduled destruction; and
 
 ## Development
 
-`npm ci` once, then `npm run format` before committing. `test/sh/golden.sh` runs the scripts under `dash` (or
-`$TEST_SH`) against a fake `gcloud` and compares the calls and output with `test/sh/golden/`; `--update` rewrites them.
-CI runs it with Prettier, `shellcheck` and `reuse lint` on every push, and Dependabot updates the pinned Actions and npm
-packages.
+`shfmt -w .` formats the shell scripts before committing, with the settings in `.editorconfig`; Markdown is wrapped at
+120 columns. `test/sh/golden.sh` runs the scripts under `dash` (or `$TEST_SH`) against a fake `gcloud` and compares the
+calls and output with `test/sh/golden/`; `--update` rewrites them. CI runs it with `shfmt`, `shellcheck` and
+`reuse lint` on every push. Dependabot updates the pinned Actions; `ci.yml` pins `shfmt` by version and SHA-256, updated
+by hand.
 
 ## License
 
