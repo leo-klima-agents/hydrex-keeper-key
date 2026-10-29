@@ -59,8 +59,8 @@ for 30 days and an admin has 120 days to cancel a scheduled destruction; and
 `shfmt -w .` formats the shell scripts before committing, with the settings in `.editorconfig`; Markdown is wrapped at
 120 columns. `test/sh/golden.sh` runs the scripts under `dash` (or `$TEST_SH`) against a fake `gcloud` and compares the
 calls and output with `test/sh/golden/`; `--update` rewrites them. CI runs it with `shfmt`, `shellcheck` and
-`reuse lint` on every push. Dependabot updates the pinned Actions; `ci.yml` pins `shfmt` by version and SHA-256, updated
-by hand.
+`reuse lint` on every push. Dependabot updates the pinned Actions; `ci.yml` pins the `fsfe/reuse` and `mvdan/shfmt`
+images by digest, updated by hand.
 
 ## License
 
